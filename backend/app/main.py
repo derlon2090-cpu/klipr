@@ -7,25 +7,19 @@ import time
 import re
 from html import unescape
 from urllib.request import HTTPRedirectHandler, Request as UrlRequest, build_opener
-from contextlib import asynccontextmanager
 from urllib.parse import urlparse, urlunparse
 from uuid import UUID
 from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import func
-from app.db import Base, engine, SessionLocal
+from app.db import SessionLocal
 from app.config import get_settings
 from app.models import ArchiveBranding, Clip, Stream, StreamStatus
 from app.storage import delete_files, presigned_download_url, upload_file
 from app.worker.tasks import WORK_ROOT, active_key, record_stream, redis_client, stop_key, task_key
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    Base.metadata.create_all(bind=engine)
-    yield
-
-app = FastAPI(title="Klipr.cloud API", description="On-demand creator stream capture and AI clip studio.", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="Klipr.cloud API", description="On-demand creator stream capture and AI clip studio.", version="0.3.0")
 app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in get_settings().klipr_cors_origins.split(",") if origin.strip()], allow_methods=["GET", "POST"], allow_headers=["Content-Type"], allow_credentials=True)
 
 
