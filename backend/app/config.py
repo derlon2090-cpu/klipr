@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     klipr_session_secret: str = ""
     klipr_allowed_email: str = "klipr.cloud@gmail.com"
     klipr_secure_cookies: bool = False
+    klipr_cors_origins: str = "https://klipr.cloud,https://klipr-zeta.vercel.app"
 
 
 @lru_cache

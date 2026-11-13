@@ -23,7 +23,7 @@ async def lifespan(_: FastAPI):
     yield
 
 app = FastAPI(title="Klipr.cloud API", description="On-demand creator stream capture and AI clip studio.", version="0.3.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000"], allow_methods=["*"], allow_headers=["*"], allow_credentials=True)
+app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in get_settings().klipr_cors_origins.split(",") if origin.strip()], allow_methods=["GET", "POST"], allow_headers=["Content-Type"], allow_credentials=True)
 
 
 @app.middleware("http")
@@ -66,6 +66,34 @@ def _client_key(request: Request) -> str:
     return hashlib.sha256(address.encode()).hexdigest()
 
 
+def _consume_record_quota(request: Request) -> str:
+    """Allow two recording-start requests per client IP per minute."""
+    client, key = redis_client(), _client_key(request)
+    rate_key, owner_key = f"klipr:record:rate:{key}", f"klipr:record:active:{key}"
+    attempts = client.incr(rate_key)
+    if attempts == 1:
+        client.expire(rate_key, 60)
+    if attempts > 2:
+        raise HTTPException(429, {"detail": "Recording rate limit exceeded", "retry_after": client.ttl(rate_key)})
+    return owner_key
+
+
+def _reserve_recording_slot(owner_key: str, stream_id: str) -> bool:
+    """Atomically reserve one of the two permitted active-recording slots."""
+    result = redis_client().eval(
+        """
+        if redis.call('SCARD', KEYS[1]) >= 2 then return 0 end
+        redis.call('SADD', KEYS[1], ARGV[1])
+        redis.call('EXPIRE', KEYS[1], 43200)
+        return 1
+        """,
+        1,
+        owner_key,
+        stream_id,
+    )
+    return bool(result)
+
+
 @app.middleware("http")
 async def require_klipr_session(request: Request, call_next):
     public_paths = {"/health", "/auth/password", "/auth/email", "/auth/me", "/docs", "/openapi.json"}
@@ -80,9 +108,18 @@ class EmailRequest(BaseModel): email: str
 
 def normalize_live_url(value: str) -> tuple[str, str]:
     parsed = urlparse(value)
-    host = (parsed.hostname or "").lower().removeprefix("www.")
-    platform = "twitch" if host in {"twitch.tv", "m.twitch.tv"} or host.endswith(".twitch.tv") else "kick" if host == "kick.com" or host.endswith(".kick.com") else None
-    if not platform: raise HTTPException(422, "Only live Twitch and Kick URLs are supported")
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise HTTPException(422, "Invalid port") from error
+    if parsed.scheme != "https" or parsed.username or parsed.password or port not in {None, 443}:
+        raise HTTPException(422, "Only standard HTTPS live URLs are allowed")
+    try:
+        host = (parsed.hostname or "").encode("idna").decode("ascii").lower()
+    except UnicodeError as error:
+        raise HTTPException(422, "Invalid hostname") from error
+    platform = "twitch" if host in {"twitch.tv", "www.twitch.tv", "m.twitch.tv"} else "kick" if host in {"kick.com", "www.kick.com"} else None
+    if not platform: raise HTTPException(422, "Only Twitch.tv and Kick.com live URLs are supported")
     path = parsed.path.rstrip("/")
     if not path or path == "/": raise HTTPException(422, "A creator channel path is required")
     return platform, urlunparse(("https", host, path, "", "", ""))
@@ -145,8 +182,9 @@ def logout(response: Response):
     response.delete_cookie("klipr_session", path="/")
 
 @app.post("/streams/record", status_code=202)
-def record(payload: RecordRequest):
+def record(payload: RecordRequest, request: Request):
     platform, normalized = normalize_live_url(str(payload.stream_url))
+    owner_key = _consume_record_quota(request)
     client, lock = redis_client(), active_key(normalized)
     if not client.set(lock, "pending", nx=True, ex=43200):
         existing = client.get(lock)
@@ -155,11 +193,15 @@ def record(payload: RecordRequest):
         with SessionLocal() as db:
             stream = Stream(channel_id=None, source_url=normalized, platform=platform, status=StreamStatus.queued)
             db.add(stream); db.commit(); db.refresh(stream)
+            if not _reserve_recording_slot(owner_key, str(stream.id)):
+                db.delete(stream); db.commit()
+                raise HTTPException(429, {"detail": "Maximum of two active recordings reached"})
         client.set(lock, str(stream.id), xx=True, ex=43200)
-        record_stream.delay(str(stream.id), normalized)
+        record_stream.delay(str(stream.id), normalized, owner_key)
         return stream_data(stream)
     except Exception:
         client.delete(lock)
+        if "stream" in locals(): client.srem(owner_key, str(stream.id))
         raise
 
 @app.get("/streams")

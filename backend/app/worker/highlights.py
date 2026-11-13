@@ -26,7 +26,7 @@ class Window:
     score: float
 
 def run(command: list[str]) -> None:
-    subprocess.run(command, check=True, capture_output=True, text=True)
+    subprocess.run(command, check=True, capture_output=True, text=True, shell=False)
 
 def extract_audio(vod: Path, wav: Path) -> None:
     run(["ffmpeg", "-y", "-i", str(vod), "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(wav)])

@@ -12,6 +12,7 @@ The API uses `backend/requirements.txt`, which deliberately excludes `faster-whi
 2. Add `NEXT_PUBLIC_API_URL=/api` to Vercel's Production, Preview, and Development environment variables.
 3. Add the production values for `DATABASE_URL`, `REDIS_URL`, and the R2 variables from `.env.example` to the **api** service.
 4. Add `KLIPR_ACCESS_PASSWORD` and a long random `KLIPR_SESSION_SECRET` to the **api** service. These are server-only values; do not use `NEXT_PUBLIC_` prefixes or commit them. Set `KLIPR_SECURE_COOKIES=true` for Vercel.
+5. Set `KLIPR_CORS_ORIGINS=https://klipr.cloud,https://klipr-zeta.vercel.app` in Production. The default API policy permits only these two browser origins; use `http://localhost:3000` only for local development.
 
 ## Required worker deployment
 
