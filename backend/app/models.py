@@ -41,6 +41,8 @@ class ArchiveBranding(Base):
     archive_channel_name: Mapped[str | None] = mapped_column(String(120))
     archive_tagline: Mapped[str | None] = mapped_column(String(240))
     archive_logo_key: Mapped[str | None] = mapped_column(Text)
+    default_thumbnail_key: Mapped[str | None] = mapped_column(Text)
+    use_default_thumbnail: Mapped[bool] = mapped_column(Boolean, default=True)
     default_left_vod_id: Mapped[UUID | None] = mapped_column(nullable=True)
     default_right_vod_id: Mapped[UUID | None] = mapped_column(nullable=True)
 

@@ -5,13 +5,21 @@ from PIL import Image, ImageDraw
 from .thumbnails import _font, platform_color
 SAFE_ZONES = ((110, 310, 560, 315), (1250, 310, 560, 315))
 def recommendation_slots(vods: list[object]) -> list[object | None]: return (vods[:2] + [None, None])[:2]
-def render_outro(destination: Path, platform: str, channel: str, tagline: str, metadata: str, recommendations: list[object], duration: int = 15) -> None:
+def render_outro(destination: Path, platform: str, channel: str, tagline: str, metadata: str, recommendations: list[object], duration: int = 15, logo_path: Path | None = None) -> None:
     accent = platform_color(platform); image = Image.new("RGB", (1920,1080), "#0b0b10"); draw = ImageDraw.Draw(image)
     draw.rounded_rectangle((35,35,1885,1045), 40, outline=accent, width=14)
     for index, (x,y,w,h) in enumerate(SAFE_ZONES):
         draw.rounded_rectangle((x,y,x+w,y+h), 28, fill="#15151c", outline=accent, width=7)
         draw.text((x+150,y+135), "Watch Next" if recommendation_slots(recommendations)[index] else "More soon", font=_font(30), fill="white")
-    draw.ellipse((840,90,1080,330), fill="#17171d", outline=accent, width=10); draw.text((760,365), channel or "Klipr Archive", font=_font(44), fill="white")
+    draw.ellipse((840,90,1080,330), fill="#17171d", outline=accent, width=10)
+    if logo_path and logo_path.exists():
+        try:
+            logo = Image.open(logo_path).convert("RGBA").resize((220,220))
+            mask = Image.new("L", (220,220), 0); ImageDraw.Draw(mask).ellipse((0,0,220,220), fill=255)
+            image.paste(logo, (850,100), mask)
+        except Exception:
+            pass
+    draw.text((760,365), channel or "Klipr Archive", font=_font(44), fill="white")
     draw.rounded_rectangle((790,430,1130,500), 28, fill=accent); draw.text((840,447), "Subscribe / اشترك", font=_font(25), fill="black")
     draw.rectangle((0,950,1920,1080), fill="#101016"); draw.text((65,995), f"{metadata}  •  {tagline}", font=_font(26), fill="white")
     destination.parent.mkdir(parents=True, exist_ok=True); image.save(destination.with_suffix(".png"))

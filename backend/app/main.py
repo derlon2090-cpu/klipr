@@ -12,15 +12,15 @@ from uuid import UUID
 from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import func, text
 from app.db import SessionLocal
 from app.config import get_settings
 from app.models import ArchiveBranding, Clip, Stream, StreamStatus
-from app.storage import delete_files, presigned_download_url, upload_file
+from app.storage import copy_file, delete_files, presigned_download_url, upload_file
 from app.worker.tasks import WORK_ROOT, active_key, record_stream, redis_client, stop_key, task_key
 
 app = FastAPI(title="Klipr.cloud API", description="On-demand creator stream capture and AI clip studio.", version="0.3.0")
-app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in get_settings().klipr_cors_origins.split(",") if origin.strip()], allow_methods=["GET", "POST"], allow_headers=["Content-Type"], allow_credentials=True)
+app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in get_settings().klipr_cors_origins.split(",") if origin.strip()], allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["Content-Type"], allow_credentials=True)
 
 
 @app.middleware("http")
@@ -115,6 +115,7 @@ class ProcessRequest(BaseModel):
     embed_intro_cover: bool | None = None
 class BrandingRequest(BaseModel):
     enable_end_screen: bool = True
+    use_default_thumbnail: bool = True
     outro_duration_seconds: int = 15
     archive_channel_name: str | None = None
     archive_tagline: str | None = None
@@ -201,13 +202,19 @@ def stream_data(stream: Stream, clips: list[Clip] | None = None) -> dict:
 def health(): return {"ok": True}
 
 def _branding(db):
+    # Lazy, idempotent upgrade keeps existing deployments compatible without
+    # making serverless startup depend on a database connection.
+    if db.bind.dialect.name == "postgresql":
+        db.execute(text("ALTER TABLE archive_branding ADD COLUMN IF NOT EXISTS default_thumbnail_key TEXT"))
+        db.execute(text("ALTER TABLE archive_branding ADD COLUMN IF NOT EXISTS use_default_thumbnail BOOLEAN NOT NULL DEFAULT TRUE"))
+        db.commit()
     item = db.get(ArchiveBranding, 1)
     if not item: item = ArchiveBranding(id=1); db.add(item); db.commit(); db.refresh(item)
     return item
 @app.get("/branding")
 def get_branding():
     with SessionLocal() as db:
-        item = _branding(db); return {"enable_end_screen":item.enable_end_screen,"outro_duration_seconds":item.outro_duration_seconds,"archive_channel_name":item.archive_channel_name,"archive_tagline":item.archive_tagline,"archive_logo_key":item.archive_logo_key,"archive_logo_url":presigned_download_url(item.archive_logo_key) if item.archive_logo_key else None,"default_left_vod_id":item.default_left_vod_id,"default_right_vod_id":item.default_right_vod_id}
+        item = _branding(db); return {"enable_end_screen":item.enable_end_screen,"use_default_thumbnail":item.use_default_thumbnail,"outro_duration_seconds":item.outro_duration_seconds,"archive_channel_name":item.archive_channel_name,"archive_tagline":item.archive_tagline,"archive_logo_key":item.archive_logo_key,"archive_logo_url":presigned_download_url(item.archive_logo_key) if item.archive_logo_key else None,"default_thumbnail_key":item.default_thumbnail_key,"default_thumbnail_url":presigned_download_url(item.default_thumbnail_key) if item.default_thumbnail_key else None,"default_left_vod_id":item.default_left_vod_id,"default_right_vod_id":item.default_right_vod_id}
 @app.put("/branding")
 def put_branding(payload: BrandingRequest):
     if not 10 <= payload.outro_duration_seconds <= 20: raise HTTPException(422,"outro_duration_seconds must be between 10 and 20")
@@ -237,6 +244,30 @@ async def upload_branding_logo(file: UploadFile = File(...)):
 def delete_branding_logo():
     with SessionLocal() as db:
         item = _branding(db); old = item.archive_logo_key; item.archive_logo_key = None; db.commit()
+    if old: delete_files([old])
+
+@app.post("/branding/thumbnail")
+async def upload_branding_thumbnail(file: UploadFile = File(...)):
+    data = await file.read()
+    is_png, is_jpg, is_webp = data.startswith(b"\x89PNG\r\n\x1a\n"), data.startswith(b"\xff\xd8\xff"), data.startswith(b"RIFF") and data[8:12] == b"WEBP"
+    if len(data) > 8*1024*1024 or not (is_png or is_jpg or is_webp): raise HTTPException(422,"Thumbnail must be a PNG, JPG, or WebP under 8MB")
+    import tempfile
+    suffix = ".png" if is_png else ".jpg" if is_jpg else ".webp"
+    content_type = "image/png" if is_png else "image/jpeg" if is_jpg else "image/webp"
+    key = f"branding/thumbnail_{secrets.token_hex(12)}{suffix}"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temp: temp.write(data); path = Path(temp.name)
+    try:
+        upload_file(path,key,content_type)
+        with SessionLocal() as db:
+            item=_branding(db); old=item.default_thumbnail_key; item.default_thumbnail_key=key; item.use_default_thumbnail=True; db.commit()
+        if old: delete_files([old])
+    finally: path.unlink(missing_ok=True)
+    return {"default_thumbnail_key":key,"default_thumbnail_url":presigned_download_url(key),"use_default_thumbnail":True}
+
+@app.delete("/branding/thumbnail", status_code=204)
+def delete_branding_thumbnail():
+    with SessionLocal() as db:
+        item = _branding(db); old = item.default_thumbnail_key; item.default_thumbnail_key = None; item.use_default_thumbnail = False; db.commit()
     if old: delete_files([old])
 
 
@@ -308,8 +339,18 @@ def record(payload: RecordRequest, request: Request):
         raise HTTPException(409, {"detail": "This URL is already recording", "stream_id": existing})
     try:
         with SessionLocal() as db:
-            stream = Stream(channel_id=None, source_url=normalized, platform=platform, status=StreamStatus.queued, layout_mode=layout_mode, discord_webhook_url=webhook, custom_headline=(payload.custom_headline or "").strip()[:160] or None, enable_end_screen=payload.enable_end_screen)
-            db.add(stream); db.commit(); db.refresh(stream)
+            branding = _branding(db)
+            stream = Stream(channel_id=None, source_url=normalized, platform=platform, status=StreamStatus.queued, layout_mode=layout_mode, discord_webhook_url=webhook, custom_headline=(payload.custom_headline or "").strip()[:160] or None, enable_end_screen=branding.enable_end_screen, archive_channel_name=branding.archive_channel_name, archive_tagline=branding.archive_tagline, outro_duration_seconds=branding.outro_duration_seconds, left_vod_id=branding.default_left_vod_id, right_vod_id=branding.default_right_vod_id)
+            db.add(stream); db.flush()
+            if branding.default_thumbnail_key and branding.use_default_thumbnail:
+                suffix = Path(branding.default_thumbnail_key).suffix or ".png"
+                stream.thumbnail_key = f"streams/{stream.id}/custom-thumbnail{suffix}"
+                copy_file(branding.default_thumbnail_key, stream.thumbnail_key)
+            if branding.archive_logo_key:
+                suffix = Path(branding.archive_logo_key).suffix or ".png"
+                stream.archive_logo_key = f"streams/{stream.id}/archive-logo{suffix}"
+                copy_file(branding.archive_logo_key, stream.archive_logo_key)
+            db.commit(); db.refresh(stream)
             if not _reserve_recording_slot(owner_key, str(stream.id)):
                 db.delete(stream); db.commit()
                 raise HTTPException(429, {"detail": "Maximum of two active recordings reached"})

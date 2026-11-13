@@ -20,6 +20,16 @@ def download_file(key: str, destination: Path) -> None:
     r2_client().download_file(get_settings().r2_bucket, key, str(destination))
 
 
+def copy_file(source_key: str, destination_key: str) -> None:
+    """Create an independent R2 snapshot so later preset changes stay isolated."""
+    settings = get_settings()
+    r2_client().copy_object(
+        Bucket=settings.r2_bucket,
+        CopySource={"Bucket": settings.r2_bucket, "Key": source_key},
+        Key=destination_key,
+    )
+
+
 def presigned_download_url(key: str) -> str:
     settings = get_settings()
     return r2_client().generate_presigned_url(
