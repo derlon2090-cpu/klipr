@@ -27,7 +27,6 @@ export type Stream = {
   error: string | null;
   stop_requested: boolean;
   layout_mode: "center" | "split";
-  remove_music: boolean;
   clip_count?: number;
   clips?: Clip[];
 };
@@ -40,7 +39,6 @@ export type StreamPreview = {
 };
 export type Branding = {
   enable_end_screen: boolean;
-  remove_music: boolean;
   use_default_thumbnail: boolean;
   outro_duration_seconds: number;
   archive_channel_name: string | null;
@@ -108,13 +106,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ stream_url }),
     }),
-  record: (stream_url: string, options?: { remove_music?: boolean }) =>
+  record: (stream_url: string) =>
     request<Stream>("/streams/record", {
       method: "POST",
       body: JSON.stringify({
         stream_url,
         layout_mode: "split",
-        ...options,
       }),
     }),
   stop: (id: string) =>
@@ -128,7 +125,6 @@ export const api = {
       layout_mode?: "center" | "split";
       discord_webhook_url?: string;
       embed_intro_cover?: boolean;
-      remove_music?: boolean;
     },
   ) =>
     request<void>(`/recordings/${id}/clips/generate`, {
