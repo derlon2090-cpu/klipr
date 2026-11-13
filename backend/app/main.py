@@ -10,14 +10,14 @@ from urllib.request import HTTPRedirectHandler, Request as UrlRequest, build_ope
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse, urlunparse
 from uuid import UUID
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import func
 from app.db import Base, engine, SessionLocal
 from app.config import get_settings
-from app.models import Clip, Stream, StreamStatus
-from app.storage import delete_files, presigned_download_url
+from app.models import ArchiveBranding, Clip, Stream, StreamStatus
+from app.storage import delete_files, presigned_download_url, upload_file
 from app.worker.tasks import WORK_ROOT, active_key, record_stream, redis_client, stop_key, task_key
 
 @asynccontextmanager
@@ -117,6 +117,13 @@ class ProcessRequest(BaseModel):
     max_clips: int = 3
     custom_headline: str | None = None
     embed_intro_cover: bool | None = None
+class BrandingRequest(BaseModel):
+    enable_end_screen: bool = True
+    outro_duration_seconds: int = 15
+    archive_channel_name: str | None = None
+    archive_tagline: str | None = None
+    default_left_vod_id: UUID | None = None
+    default_right_vod_id: UUID | None = None
 class PasswordRequest(BaseModel): password: str
 class EmailRequest(BaseModel): email: str
 
@@ -196,6 +203,45 @@ def stream_data(stream: Stream, clips: list[Clip] | None = None) -> dict:
 
 @app.get("/health")
 def health(): return {"ok": True}
+
+def _branding(db):
+    item = db.get(ArchiveBranding, 1)
+    if not item: item = ArchiveBranding(id=1); db.add(item); db.commit(); db.refresh(item)
+    return item
+@app.get("/branding")
+def get_branding():
+    with SessionLocal() as db:
+        item = _branding(db); return {"enable_end_screen":item.enable_end_screen,"outro_duration_seconds":item.outro_duration_seconds,"archive_channel_name":item.archive_channel_name,"archive_tagline":item.archive_tagline,"archive_logo_key":item.archive_logo_key,"default_left_vod_id":item.default_left_vod_id,"default_right_vod_id":item.default_right_vod_id}
+@app.put("/branding")
+def put_branding(payload: BrandingRequest):
+    if not 10 <= payload.outro_duration_seconds <= 20: raise HTTPException(422,"outro_duration_seconds must be between 10 and 20")
+    with SessionLocal() as db:
+        item = _branding(db)
+        for name, value in payload.model_dump().items(): setattr(item,name,value)
+        db.commit()
+    return get_branding()
+@app.post("/branding/logo")
+async def upload_branding_logo(file: UploadFile = File(...)):
+    data = await file.read()
+    is_png, is_jpg, is_webp = data.startswith(b"\x89PNG\r\n\x1a\n"), data.startswith(b"\xff\xd8\xff"), data.startswith(b"RIFF") and data[8:12] == b"WEBP"
+    if len(data) > 5*1024*1024 or not (is_png or is_jpg or is_webp): raise HTTPException(422,"Logo must be a PNG, JPG, or WebP under 5MB")
+    import tempfile
+    suffix = ".png" if is_png else ".jpg" if is_jpg else ".webp"
+    key = f"branding/logo_{secrets.token_hex(12)}{suffix}"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temp: temp.write(data); path = Path(temp.name)
+    try:
+        upload_file(path,key,"image/png" if suffix==".png" else "image/jpeg")
+        with SessionLocal() as db:
+            item=_branding(db); old=item.archive_logo_key; item.archive_logo_key=key; db.commit()
+        if old: delete_files([old])
+    finally: path.unlink(missing_ok=True)
+    return {"archive_logo_key":key}
+
+@app.delete("/branding/logo", status_code=204)
+def delete_branding_logo():
+    with SessionLocal() as db:
+        item = _branding(db); old = item.archive_logo_key; item.archive_logo_key = None; db.commit()
+    if old: delete_files([old])
 
 
 @app.post("/auth/password")

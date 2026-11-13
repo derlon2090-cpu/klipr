@@ -33,6 +33,17 @@ class Channel(Base):
     auto_record: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+class ArchiveBranding(Base):
+    __tablename__ = "archive_branding"
+    id: Mapped[int] = mapped_column(primary_key=True, default=1)
+    enable_end_screen: Mapped[bool] = mapped_column(Boolean, default=True)
+    outro_duration_seconds: Mapped[int] = mapped_column(default=15)
+    archive_channel_name: Mapped[str | None] = mapped_column(String(120))
+    archive_tagline: Mapped[str | None] = mapped_column(String(240))
+    archive_logo_key: Mapped[str | None] = mapped_column(Text)
+    default_left_vod_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    default_right_vod_id: Mapped[UUID | None] = mapped_column(nullable=True)
+
 
 class Stream(Base):
     __tablename__ = "streams"

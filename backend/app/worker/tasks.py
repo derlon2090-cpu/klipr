@@ -8,7 +8,7 @@ import redis
 from celery import shared_task
 from app.config import get_settings
 from app.db import SessionLocal
-from app.models import Stream, StreamStatus
+from app.models import ArchiveBranding, Stream, StreamStatus
 from app.storage import upload_file
 
 WORK_ROOT = Path("/var/lib/klipr")
@@ -95,6 +95,16 @@ def finalize_stream(stream_id: str, normalized_url: str | None = None, owner_key
         manifest, master = job_dir / "concat.txt", job_dir / "master.mp4"
         manifest.write_text("".join(f"file '{p.as_posix()}'\n" for p in chunks), encoding="utf-8")
         subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(manifest), "-c", "copy", "-movflags", "+faststart", str(master)], check=True, shell=False)
+        with SessionLocal() as db:
+            stream = db.get(Stream, sid); branding = db.get(ArchiveBranding, 1)
+            enabled = bool((branding.enable_end_screen if branding else True) and stream and stream.enable_end_screen)
+            if enabled:
+                from app.worker.outro import concat_command, render_outro
+                recommendations = db.query(Stream).filter(Stream.id != sid, Stream.status == StreamStatus.ready).order_by(Stream.created_at.desc()).limit(2).all()
+                outro, merged = job_dir / "outro.mp4", job_dir / "master-with-outro.mp4"
+                render_outro(outro, stream.platform, (branding.archive_channel_name if branding else None) or "Klipr Archive", (branding.archive_tagline if branding else None) or "Archive Channel • Klipr.cloud", f"{stream.platform.upper()} • {stream.source_url}", recommendations, branding.outro_duration_seconds if branding else 15)
+                subprocess.run(concat_command(master, outro, merged), check=True, shell=False)
+                master = merged
         key = f"streams/{stream_id}/master.mp4"; upload_file(master, key, "video/mp4")
         _set_status(sid, StreamStatus.processing, master_key=key, ended_at=datetime.now(timezone.utc))
         from app.worker.highlights import process_stream_highlights
