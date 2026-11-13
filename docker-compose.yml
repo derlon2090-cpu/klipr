@@ -1,0 +1,58 @@
+name: klipr
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-klipr}
+      POSTGRES_USER: ${POSTGRES_USER:-klipr}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-klipr} -d ${POSTGRES_DB:-klipr}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes: [redis_data:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  api:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://klipr:change-me@postgres:5432/klipr}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    ports: ["8000:8000"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    env_file: .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://klipr:change-me@postgres:5432/klipr}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    command: celery -A app.worker.celery_app worker --loglevel=INFO --concurrency=2
+    volumes: [worker_media:/var/lib/klipr]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    env_file: .env
+    ports: ["3000:3000"]
+    depends_on: [api]
+volumes:
+  postgres_data:
+  redis_data:
+  worker_media:

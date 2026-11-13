@@ -1,0 +1,4 @@
+import { LoaderCircle } from "lucide-react";
+import { Status } from "@/lib/api";
+const labels: Record<Status, string> = { queued: "Queued", recording: "LIVE · Recording", reconnecting: "Reconnecting", processing: "Processing AI clips", ready: "Ready", failed: "Failed" };
+export function StatusBadge({ status }: { status: Status }) { const active = status === "recording"; const work = status === "processing" || status === "queued" || status === "reconnecting"; return <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-bold ${status === "failed" ? "bg-red-500/15 text-red-300" : active ? "bg-red-500/15 text-red-300" : "bg-white/8 text-zinc-300"}`}>{work ? <LoaderCircle size={13} className="animate-spin"/> : <i className={`size-2 rounded-full ${active ? "animate-pulse bg-red-400" : status === "ready" ? "bg-acid" : "bg-zinc-400"}`}/>} {labels[status]}</span>; }
