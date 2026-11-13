@@ -243,18 +243,31 @@ def verify_password(payload: PasswordRequest, request: Request, response: Respon
     settings = get_settings()
     if not settings.klipr_access_password or not settings.klipr_session_secret:
         raise HTTPException(503, "Authentication is not configured")
-    client, key = redis_client(), _client_key(request)
+    # Authentication must remain available when the optional Redis-backed
+    # rate limiter is not configured (for example on a Vercel web function).
+    # Recording jobs still require Redis, but password verification does not.
+    client = None
+    try:
+        candidate = redis_client()
+        candidate.ping()
+        client = candidate
+    except Exception:
+        pass
+    key = _client_key(request)
     lock = f"klipr:auth:lock:{key}"
-    if client.exists(lock):
+    if client and client.exists(lock):
         raise HTTPException(429, {"detail": "Too many attempts", "retry_after": client.ttl(lock)})
     if not secrets.compare_digest(payload.password, settings.klipr_access_password):
-        attempts = client.incr(f"klipr:auth:attempts:{key}")
-        client.expire(f"klipr:auth:attempts:{key}", 180)
-        if attempts >= 3:
-            client.set(lock, "1", ex=180); client.delete(f"klipr:auth:attempts:{key}")
-            raise HTTPException(429, {"detail": "Too many attempts", "retry_after": 180})
-        raise HTTPException(401, {"detail": "Incorrect password", "remaining": 3 - attempts})
-    client.delete(f"klipr:auth:attempts:{key}")
+        if client:
+            attempts = client.incr(f"klipr:auth:attempts:{key}")
+            client.expire(f"klipr:auth:attempts:{key}", 180)
+            if attempts >= 3:
+                client.set(lock, "1", ex=180); client.delete(f"klipr:auth:attempts:{key}")
+                raise HTTPException(429, {"detail": "Too many attempts", "retry_after": 180})
+            raise HTTPException(401, {"detail": "Incorrect password", "remaining": 3 - attempts})
+        raise HTTPException(401, "Incorrect password")
+    if client:
+        client.delete(f"klipr:auth:attempts:{key}")
     response.set_cookie("klipr_ticket", _token({"kind": "ticket", "exp": time.time() + 600}), httponly=True, secure=settings.klipr_secure_cookies, samesite="lax", max_age=600, path="/")
     return {"next": "email"}
 
