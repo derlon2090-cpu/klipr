@@ -19,6 +19,14 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="Klipr.cloud API", description="On-demand creator stream capture and AI clip studio.", version="0.3.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000"], allow_methods=["*"], allow_headers=["*"], allow_credentials=True)
 
+
+@app.middleware("http")
+async def strip_vercel_api_prefix(request, call_next):
+    """Vercel Services routes /api/* to this app while local Docker keeps direct paths."""
+    if request.scope["path"].startswith("/api/"):
+        request.scope["path"] = request.scope["path"][4:] or "/"
+    return await call_next(request)
+
 class RecordRequest(BaseModel): stream_url: AnyHttpUrl
 
 def normalize_live_url(value: str) -> tuple[str, str]:
