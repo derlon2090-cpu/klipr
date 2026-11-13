@@ -13,3 +13,14 @@ Use Alembic instead of startup schema creation, authenticate API routes, and val
 ## Direct Twitch/Kick recording
 
 `POST /streams/record` accepts only a live Twitch or Kick URL. It creates a Redis `active_stream:{url}` lock before dispatching the recording worker, so duplicate submissions are rejected without any scheduler or platform polling. `POST /streams/{id}/stop` requests a cooperative stop; the worker stitches the recorded chunks and queues AI clipping. For an existing database, apply [001_direct_ingestion.sql](backend/migrations/001_direct_ingestion.sql) once before deployment.
+
+## Automated tests
+
+From `backend/`, install the development dependencies and run the isolated suite:
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+It covers source/webhook validation, Redis rate and slot logic, and ASS caption plus 9:16 filter generation without a live stream. Existing databases also need [002_creator_studio.sql](backend/migrations/002_creator_studio.sql) after the first migration.

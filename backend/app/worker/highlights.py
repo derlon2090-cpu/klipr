@@ -7,7 +7,6 @@ from pathlib import Path
 from uuid import UUID
 import numpy as np
 from celery import shared_task
-from faster_whisper import WhisperModel
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import Clip, Stream, StreamStatus
@@ -42,6 +41,7 @@ def rms_windows(wav: Path, seconds: int = 5) -> tuple[list[float], float]:
     return [value / maximum if maximum else 0.0 for value in values], frames / rate
 
 def transcribe(wav: Path) -> list[Word]:
+    from faster_whisper import WhisperModel
     config = get_settings()
     model = WhisperModel(config.whisper_model, device=config.whisper_device, compute_type=config.whisper_compute_type)
     segments, _ = model.transcribe(str(wav), word_timestamps=True, vad_filter=True)
@@ -115,17 +115,16 @@ def find_facecam_crop(vod: Path, window: Window) -> tuple[int, int, int, int] | 
     except Exception:
         return None
 
-def render_vertical(vod: Path, ass: Path, window: Window, destination: Path, layout_mode: str) -> None:
+def build_filter_graph(ass: Path, layout_mode: str, facecam_crop: tuple[int, int, int, int] | None = None) -> str:
     ass_path = ass.as_posix().replace("'", r"\'").replace(":", r"\:")
-    if layout_mode == "split":
-        crop = find_facecam_crop(vod, window)
-        if crop:
-            x, y, width, height = crop
+    if layout_mode == "split" and facecam_crop:
+            x, y, width, height = facecam_crop
             graph = f"[0:v]split=2[cam][game];[cam]crop={width}:{height}:{x}:{y},scale=1080:960[top];[game]scale=1080:960:force_original_aspect_ratio=increase,crop=1080:960[bottom];[top][bottom]vstack=inputs=2,subtitles='{ass_path}'[v]"
-        else:
-            graph = f"[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,subtitles='{ass_path}'[v]"
-    else:
-        graph = f"[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,subtitles='{ass_path}'[v]"
+    else: graph = f"[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,subtitles='{ass_path}'[v]"
+    return graph
+
+def render_vertical(vod: Path, ass: Path, window: Window, destination: Path, layout_mode: str) -> None:
+    graph = build_filter_graph(ass, layout_mode, find_facecam_crop(vod, window) if layout_mode == "split" else None)
     run(["ffmpeg", "-y", "-ss", f"{window.start:.3f}", "-t", f"{window.end-window.start:.3f}", "-i", str(vod), "-filter_complex", graph, "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-c:a", "aac", "-movflags", "+faststart", str(destination)])
 
 @shared_task
