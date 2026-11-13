@@ -18,6 +18,7 @@ def redis_client() -> redis.Redis:
 
 def stop_key(stream_id: str) -> str: return f"stop_stream:{stream_id}"
 def active_key(url: str) -> str: return f"active_stream:{url}"
+def task_key(stream_id: str) -> str: return f"stream_tasks:{stream_id}"
 
 def _release_owner(owner_key: str | None, stream_id: str) -> None:
     if owner_key:

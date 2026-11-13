@@ -17,8 +17,8 @@ from sqlalchemy import func
 from app.db import Base, engine, SessionLocal
 from app.config import get_settings
 from app.models import Clip, Stream, StreamStatus
-from app.storage import presigned_download_url
-from app.worker.tasks import active_key, record_stream, redis_client, stop_key
+from app.storage import delete_files, presigned_download_url
+from app.worker.tasks import WORK_ROOT, active_key, record_stream, redis_client, stop_key, task_key
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -259,7 +259,7 @@ def record(payload: RecordRequest, request: Request):
                 db.delete(stream); db.commit()
                 raise HTTPException(429, {"detail": "Maximum of two active recordings reached"})
         client.set(lock, str(stream.id), xx=True, ex=43200)
-        record_stream.delay(str(stream.id), normalized, owner_key)
+        task = record_stream.delay(str(stream.id), normalized, owner_key); client.sadd(task_key(str(stream.id)), task.id); client.expire(task_key(str(stream.id)), 43200)
         return stream_data(stream)
     except Exception:
         client.delete(lock)
@@ -316,9 +316,31 @@ def process_stream(stream_id: UUID, payload: ProcessRequest = ProcessRequest()):
         db.commit()
     # Keep the Vercel API package lean; the Whisper worker imports this only in its own container.
     from app.worker.highlights import process_stream_highlights
-    process_stream_highlights.delay(str(stream_id), payload.max_clips)
+    task = process_stream_highlights.delay(str(stream_id), payload.max_clips)
+    redis_client().sadd(task_key(str(stream_id)), task.id); redis_client().expire(task_key(str(stream_id)), 43200)
     return {"id": str(stream_id), "status": StreamStatus.processing}
 
 @app.post("/recordings/{stream_id}/clips/generate", status_code=202)
 def generate_custom_clips(stream_id: UUID, payload: ProcessRequest):
     return process_stream(stream_id, payload)
+
+@app.delete("/recordings/{stream_id}", status_code=204)
+def delete_recording(stream_id: UUID):
+    """Irreversible purge of task state, R2 media, local scratch and DB metadata."""
+    sid = str(stream_id)
+    with SessionLocal() as db:
+        stream = db.get(Stream, stream_id)
+        if stream is None: raise HTTPException(404, "Stream not found")
+        clips = db.query(Clip).filter(Clip.stream_id == stream_id).all()
+        keys = [key for key in [stream.master_key, stream.thumbnail_key, stream.archive_logo_key] + [value for clip in clips for value in (clip.vertical_key, clip.thumbnail_key, clip.captions_key)] if key]
+        source_url = stream.source_url
+        try:
+            from app.worker.celery_app import celery_app
+            for task_id in redis_client().smembers(task_key(sid)): celery_app.control.revoke(task_id, terminate=True)
+        finally:
+            client = redis_client(); client.set(stop_key(sid), "1", ex=300); client.delete(active_key(source_url), task_key(sid))
+        try: delete_files(keys)
+        finally:
+            import shutil
+            shutil.rmtree(WORK_ROOT / sid, ignore_errors=True)
+            db.delete(stream); db.commit()

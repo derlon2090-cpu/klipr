@@ -27,3 +27,7 @@ def presigned_download_url(key: str) -> str:
         Params={"Bucket": settings.r2_bucket, "Key": key},
         ExpiresIn=settings.r2_presigned_url_ttl_seconds,
     )
+
+def delete_files(keys: list[str]) -> None:
+    """R2 batch deletion; caller filters null keys before this point."""
+    if keys: r2_client().delete_objects(Bucket=get_settings().r2_bucket, Delete={"Objects": [{"Key": key} for key in keys], "Quiet": True})
