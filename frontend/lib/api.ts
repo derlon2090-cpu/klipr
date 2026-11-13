@@ -27,6 +27,7 @@ export type Stream = {
   error: string | null;
   stop_requested: boolean;
   layout_mode: "center" | "split";
+  remove_music: boolean;
   clip_count?: number;
   clips?: Clip[];
 };
@@ -39,6 +40,7 @@ export type StreamPreview = {
 };
 export type Branding = {
   enable_end_screen: boolean;
+  remove_music: boolean;
   use_default_thumbnail: boolean;
   outro_duration_seconds: number;
   archive_channel_name: string | null;
@@ -47,6 +49,8 @@ export type Branding = {
   archive_logo_url?: string | null;
   default_thumbnail_key: string | null;
   default_thumbnail_url?: string | null;
+  default_short_thumbnail_key: string | null;
+  default_short_thumbnail_url?: string | null;
   default_left_vod_id: string | null;
   default_right_vod_id: string | null;
 };
@@ -104,12 +108,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ stream_url }),
     }),
-  record: (stream_url: string) =>
+  record: (stream_url: string, options?: { remove_music?: boolean }) =>
     request<Stream>("/streams/record", {
       method: "POST",
       body: JSON.stringify({
         stream_url,
         layout_mode: "split",
+        ...options,
       }),
     }),
   stop: (id: string) =>
@@ -123,6 +128,7 @@ export const api = {
       layout_mode?: "center" | "split";
       discord_webhook_url?: string;
       embed_intro_cover?: boolean;
+      remove_music?: boolean;
     },
   ) =>
     request<void>(`/recordings/${id}/clips/generate`, {
@@ -139,6 +145,8 @@ export const api = {
       | "archive_logo_url"
       | "default_thumbnail_key"
       | "default_thumbnail_url"
+      | "default_short_thumbnail_key"
+      | "default_short_thumbnail_url"
     >,
   ) =>
     request<Branding>("/branding", {
@@ -154,15 +162,17 @@ export const api = {
     );
   },
   deleteLogo: () => request<void>("/branding/logo", { method: "DELETE" }),
-  uploadThumbnail: (file: File) => {
+  uploadThumbnail: (file: File, kind: "vod" | "short") => {
     const body = new FormData();
     body.append("file", file);
+    body.append("kind", kind);
     return upload<{
-      default_thumbnail_key: string;
-      default_thumbnail_url: string;
+      kind: "vod" | "short";
+      key: string;
+      url: string;
       use_default_thumbnail: boolean;
     }>("/branding/thumbnail", body);
   },
-  deleteThumbnail: () =>
-    request<void>("/branding/thumbnail", { method: "DELETE" }),
+  deleteThumbnail: (kind: "vod" | "short") =>
+    request<void>(`/branding/thumbnail?kind=${kind}`, { method: "DELETE" }),
 };

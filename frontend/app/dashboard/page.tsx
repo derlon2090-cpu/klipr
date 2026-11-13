@@ -24,6 +24,7 @@ import { useLanguage } from "@/components/language";
 
 const emptyBranding: Branding = {
   enable_end_screen: true,
+  remove_music: false,
   use_default_thumbnail: true,
   outro_duration_seconds: 15,
   archive_channel_name: "",
@@ -32,6 +33,8 @@ const emptyBranding: Branding = {
   archive_logo_url: null,
   default_thumbnail_key: null,
   default_thumbnail_url: null,
+  default_short_thumbnail_key: null,
+  default_short_thumbnail_url: null,
   default_left_vod_id: null,
   default_right_vod_id: null,
 };
@@ -120,17 +123,17 @@ export default function Dashboard() {
     [message, setMessage] = useState(""),
     [now, setNow] = useState(Date.now());
   const [options, setOptions] = useState(false);
+  const [removeMusic, setRemoveMusic] = useState(false);
   const [search, setSearch] = useState(""),
     [filter, setFilter] = useState<"all" | "twitch" | "kick">("all"),
     [deleting, setDeleting] = useState<string | null>(null);
   const [selected, setSelected] = useState(""),
     [clipDuration, setClipDuration] = useState(30),
     [clipCount, setClipCount] = useState(3),
-    [clipLayout, setClipLayout] = useState<"center" | "split">("split"),
     [clipHeadline, setClipHeadline] = useState(""),
     [embedCover, setEmbedCover] = useState(true);
   const [thumbPlatform, setThumbPlatform] = useState<"twitch" | "kick">("kick"),
-    [thumbHeadline, setThumbHeadline] = useState("أفضل لحظات البث");
+    [thumbFormat, setThumbFormat] = useState<"vod" | "short">("vod");
   const [branding, setBranding] = useState<Branding>(emptyBranding),
     [logoPreview, setLogoPreview] = useState<string | null>(null),
     [savingBrand, setSavingBrand] = useState(false);
@@ -156,7 +159,10 @@ export default function Dashboard() {
     load();
     api
       .branding()
-      .then(setBranding)
+      .then((value) => {
+        setBranding(value);
+        setRemoveMusic(value.remove_music);
+      })
       .catch(() => undefined);
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
@@ -221,7 +227,7 @@ export default function Dashboard() {
     setBusy(true);
     setMessage("");
     try {
-      await api.record(url);
+      await api.record(url, { remove_music: removeMusic });
       setUrl("");
       setPreview(null);
       await load();
@@ -265,8 +271,9 @@ export default function Dashboard() {
         duration_seconds: clipDuration,
         max_clips: clipCount,
         custom_headline: clipHeadline,
-        layout_mode: clipLayout,
-        embed_intro_cover: embedCover,
+        embed_intro_cover:
+          embedCover && Boolean(branding.default_short_thumbnail_key),
+        remove_music: removeMusic,
       });
       await load();
       setDetailed(await api.stream(selected));
@@ -290,6 +297,8 @@ export default function Dashboard() {
         archive_logo_url: _url,
         default_thumbnail_key: _thumbnailKey,
         default_thumbnail_url: _thumbnailUrl,
+        default_short_thumbnail_key: _shortThumbnailKey,
+        default_short_thumbnail_url: _shortThumbnailUrl,
         ...payload
       } = branding;
       setBranding(await api.saveBranding(payload));
@@ -348,6 +357,8 @@ export default function Dashboard() {
       archive_logo_url: _logoUrl,
       default_thumbnail_key: _thumbnailKey,
       default_thumbnail_url: _thumbnailUrl,
+      default_short_thumbnail_key: _shortThumbnailKey,
+      default_short_thumbnail_url: _shortThumbnailUrl,
       ...payload
     } = next;
     try {
@@ -366,8 +377,10 @@ export default function Dashboard() {
     setMessage("");
     try {
       const canvas = document.createElement("canvas");
-      canvas.width = 1280;
-      canvas.height = 720;
+      canvas.width = thumbFormat === "short" ? 1080 : 1280;
+      canvas.height = thumbFormat === "short" ? 1920 : 720;
+      const canvasWidth = canvas.width;
+      const canvasHeight = canvas.height;
       const context = canvas.getContext("2d");
       if (!context) throw new Error("Canvas is unavailable");
       context.fillStyle = "#0f172a";
@@ -378,18 +391,21 @@ export default function Dashboard() {
             response.blob(),
           );
           const image = await createImageBitmap(source);
-          const scale = Math.max(1280 / image.width, 720 / image.height);
+          const scale = Math.max(
+            canvasWidth / image.width,
+            canvasHeight / image.height,
+          );
           const width = image.width * scale;
           const height = image.height * scale;
           context.drawImage(
             image,
-            (1280 - width) / 2,
-            (720 - height) / 2,
+            (canvasWidth - width) / 2,
+            (canvasHeight - height) / 2,
             width,
             height,
           );
           context.fillStyle = "rgba(2,6,23,.25)";
-          context.fillRect(0, 0, 1280, 720);
+          context.fillRect(0, 0, canvasWidth, canvasHeight);
         } catch {
           // The designed fallback remains usable when a remote source expires.
         }
@@ -398,32 +414,15 @@ export default function Dashboard() {
       context.strokeStyle = accent;
       context.lineWidth = 18;
       context.beginPath();
-      context.roundRect(28, 28, 1224, 664, 34);
+      context.roundRect(28, 28, canvasWidth - 56, canvasHeight - 56, 34);
       context.stroke();
       context.fillStyle = thumbPlatform === "twitch" ? "#9146FF" : "#20b94b";
       context.beginPath();
-      context.roundRect(55, 55, 220, 72, 22);
+      context.roundRect(55, 55, 255, 72, 22);
       context.fill();
       context.fillStyle = "white";
       context.font = "900 26px Arial";
-      context.fillText(`${thumbPlatform.toUpperCase()} · VOD`, 78, 100);
-      const headline =
-        thumbHeadline.trim() ||
-        (ar ? "أفضل لحظات البث" : "BEST STREAM MOMENTS");
-      context.font = "900 42px Arial";
-      const textWidth = Math.min(1050, context.measureText(headline).width);
-      const boxWidth = textWidth + 64;
-      const boxX = (1280 - boxWidth) / 2;
-      context.fillStyle = "rgba(2,6,23,.9)";
-      context.beginPath();
-      context.roundRect(boxX, 500, boxWidth, 90, 36);
-      context.fill();
-      context.strokeStyle = accent;
-      context.lineWidth = 4;
-      context.stroke();
-      context.fillStyle = "white";
-      context.textAlign = "center";
-      context.fillText(headline, 640, 558, 1040);
+      context.fillText(`${thumbPlatform.toUpperCase()} · KLIPR`, 78, 100);
       const blob = await new Promise<Blob>((resolve, reject) =>
         canvas.toBlob(
           (value) => (value ? resolve(value) : reject(new Error("PNG failed"))),
@@ -432,18 +431,33 @@ export default function Dashboard() {
         ),
       );
       const result = await api.uploadThumbnail(
-        new File([blob], "klipr-thumbnail.png", { type: "image/png" }),
+        new File([blob], `klipr-${thumbFormat}-thumbnail.png`, {
+          type: "image/png",
+        }),
+        thumbFormat,
       );
-      setBranding((current) => ({
-        ...current,
-        default_thumbnail_key: result.default_thumbnail_key,
-        default_thumbnail_url: result.default_thumbnail_url,
-        use_default_thumbnail: true,
-      }));
+      setBranding((current) =>
+        thumbFormat === "short"
+          ? {
+              ...current,
+              default_short_thumbnail_key: result.key,
+              default_short_thumbnail_url: result.url,
+            }
+          : {
+              ...current,
+              default_thumbnail_key: result.key,
+              default_thumbnail_url: result.url,
+              use_default_thumbnail: true,
+            },
+      );
       setMessage(
         ar
-          ? "تم حفظ الثامبنيل، وستُدرج تلقائيًا في كل بث جديد."
-          : "Thumbnail saved and will be added to every new recording.",
+          ? thumbFormat === "short"
+            ? "تم حفظ ثامبنيل الشورت الطولي لاستخدامه في بداية الشورتات."
+            : "تم حفظ ثامبنيل البث العادي لكل التسجيلات الجديدة."
+          : thumbFormat === "short"
+            ? "Vertical Short thumbnail saved for Short intros."
+            : "Regular VOD thumbnail saved for new recordings.",
       );
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Request failed");
@@ -451,15 +465,23 @@ export default function Dashboard() {
       setBusy(false);
     }
   };
-  const deleteThumbnail = async () => {
+  const deleteThumbnail = async (kind: "vod" | "short" = thumbFormat) => {
     try {
-      await api.deleteThumbnail();
-      setBranding((current) => ({
-        ...current,
-        default_thumbnail_key: null,
-        default_thumbnail_url: null,
-        use_default_thumbnail: false,
-      }));
+      await api.deleteThumbnail(kind);
+      setBranding((current) =>
+        kind === "short"
+          ? {
+              ...current,
+              default_short_thumbnail_key: null,
+              default_short_thumbnail_url: null,
+            }
+          : {
+              ...current,
+              default_thumbnail_key: null,
+              default_thumbnail_url: null,
+              use_default_thumbnail: false,
+            },
+      );
       setMessage(
         ar ? "تمت إزالة الثامبنيل المحفوظة." : "Saved thumbnail removed.",
       );
@@ -586,6 +608,10 @@ export default function Dashboard() {
         </button>
         {options && (
           <div className="mt-4 grid gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:grid-cols-2">
+            <label className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 lg:col-span-2">
+              <input type="checkbox" checked={removeMusic} onChange={(e) => setRemoveMusic(e.target.checked)} className="mt-1 size-5 accent-emerald-500" />
+              <span><span className="block font-black">{ar ? "إزالة الأغاني وموسيقى الدونيشن تلقائياً (DMCA Safe)" : "Remove donation songs & music automatically (DMCA Safe)"}</span><span className="mt-1 block text-xs leading-5 text-slate-600">{ar ? "تُعزل الموسيقى الخلفية وأغاني الدونيشن مع الحفاظ على صوت الستريمر واضحًا." : "Background music and donation songs are stripped while the streamer voice stays clear."}</span></span>
+            </label>
             <article className="flex flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="flex items-start gap-4">
                 <div className="h-24 w-40 shrink-0 overflow-hidden rounded-xl bg-slate-100">
@@ -646,7 +672,7 @@ export default function Dashboard() {
                 {branding.default_thumbnail_key && (
                   <button
                     type="button"
-                    onClick={deleteThumbnail}
+                    onClick={() => deleteThumbnail("vod")}
                     className="ms-auto rounded-lg px-3 py-2 text-xs font-black text-rose-600 hover:bg-rose-50"
                   >
                     {ar ? "إزالة" : "Remove"}
@@ -844,11 +870,7 @@ export default function Dashboard() {
               </div>
               <div className="p-5">
                 <div className="flex items-center justify-between">
-                  <span
-                    className={`rounded-full px-2 py-1 text-xs font-black ${platformClass(stream.platform)}`}
-                  >
-                    {stream.platform.toUpperCase()}
-                  </span>
+                  <div className="flex items-center gap-2"><span className={`rounded-full px-2 py-1 text-xs font-black ${platformClass(stream.platform)}`}>{stream.platform.toUpperCase()}</span>{stream.remove_music && <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-black text-emerald-700">DMCA Safe • {ar ? "بدون موسيقى" : "No music"}</span>}</div>
                   <StatusBadge status={stream.status} />
                 </div>
                 <h3 className="mt-3 truncate font-black">{handle(stream)}</h3>
@@ -977,6 +999,10 @@ export default function Dashboard() {
               className={inputClass}
             />
           </div>
+          <label className="mt-4 flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+            <input type="checkbox" checked={removeMusic} onChange={(e) => setRemoveMusic(e.target.checked)} className="mt-1 size-5 accent-emerald-500" />
+            <span><span className="block text-sm font-black">{ar ? "إزالة الأغاني وموسيقى الدونيشن تلقائياً (DMCA Safe)" : "DMCA-safe vocal-only Shorts"}</span><span className="mt-1 block text-xs leading-5 text-slate-600">{ar ? "تُزال الموسيقى من الشورت مع إبقاء صوت الستريمر واضحًا." : "Strip music from each Short while retaining the streamer voice."}</span></span>
+          </label>
           <label className="mt-5 block text-sm font-black">
             {ar ? "عدد المقاطع (1–10)" : "Clip count (1–10)"}
             <input
@@ -990,37 +1016,60 @@ export default function Dashboard() {
               className={inputClass}
             />
           </label>
-          <div className="mt-5">
-            <p className="text-sm font-black">
-              {ar ? "تخطيط الشاشة" : "Layout mode"}
-            </p>
-            <div className="mt-2 grid gap-2">
-              {(["split", "center"] as const).map((value) => (
+          <div
+            className={`mt-5 rounded-2xl border p-4 ${embedCover ? "border-emerald-300 bg-emerald-50" : "border-slate-200 bg-slate-50"}`}
+          >
+            <div className="flex items-center gap-3">
+              <div className="h-28 w-16 shrink-0 overflow-hidden rounded-lg bg-slate-900">
+                {branding.default_short_thumbnail_url ? (
+                  <img
+                    src={branding.default_short_thumbnail_url}
+                    alt="Short intro thumbnail"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="grid h-full place-items-center text-slate-500">
+                    <ImageIcon size={20} />
+                  </div>
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <label className="flex items-center gap-3 font-black">
+                  <input
+                    type="checkbox"
+                    checked={
+                      embedCover &&
+                      Boolean(branding.default_short_thumbnail_key)
+                    }
+                    onChange={(e) => setEmbedCover(e.target.checked)}
+                    disabled={!branding.default_short_thumbnail_key}
+                    className="size-5 accent-emerald-500"
+                  />
+                  {ar
+                    ? "إضافة ثامبنيل في بداية الشورت"
+                    : "Add thumbnail at the start"}
+                </label>
+                <p className="mt-2 text-xs leading-5 text-slate-500">
+                  {branding.default_short_thumbnail_key
+                    ? ar
+                      ? "تظهر الصورة الطولية باحترافية خلال أول 0.8 ثانية."
+                      : "The vertical cover appears during the first 0.8 seconds."
+                    : ar
+                      ? "احفظ أولًا صورة طولية 9:16 من صانع الثامبنيل."
+                      : "Save a 9:16 cover in Thumbnail Studio first."}
+                </p>
                 <button
-                  key={value}
-                  onClick={() => setClipLayout(value)}
-                  className={`rounded-xl border p-3 text-start ${clipLayout === value ? "border-emerald-500 bg-emerald-50" : "border-slate-200"}`}
+                  onClick={() => {
+                    setThumbFormat("short");
+                    changeSection("thumbnail");
+                  }}
+                  className="mt-2 text-xs font-black text-emerald-700"
                 >
-                  <b className="block text-sm">
-                    {value === "split"
-                      ? ar
-                        ? "تقسيم: كاميرا + لعب"
-                        : "Split: Facecam + Gameplay"
-                      : ar
-                        ? "قص مركزي"
-                        : "Center Crop"}
-                  </b>
-                  <span className="mt-1 block text-xs text-slate-400">
-                    {value === "split"
-                      ? ar
-                        ? "يعرض الوجه واللعب معًا"
-                        : "Keeps face and gameplay visible"
-                      : ar
-                        ? "تركيز تلقائي على المنتصف"
-                        : "Automatic center focus"}
-                  </span>
+                  {ar
+                    ? "فتح صانع الثامبنيل الطولي ←"
+                    : "Open vertical Thumbnail Studio →"}
                 </button>
-              ))}
+              </div>
             </div>
           </div>
           <label className="mt-5 block text-sm font-black">
@@ -1030,15 +1079,6 @@ export default function Dashboard() {
               onChange={(e) => setClipHeadline(e.target.value)}
               className={inputClass}
             />
-          </label>
-          <label className="mt-4 flex items-center gap-3 rounded-xl bg-slate-50 p-3 text-sm font-bold">
-            <input
-              type="checkbox"
-              checked={embedCover}
-              onChange={(e) => setEmbedCover(e.target.checked)}
-              className="size-5 accent-emerald-500"
-            />
-            {ar ? "إدراج الغلاف في أول 0.8 ثانية" : "Embed cover in first 0.8s"}
           </label>
           <button
             onClick={generate}
@@ -1085,9 +1125,7 @@ export default function Dashboard() {
                     />
                   )}
                   <div className="mt-3 flex items-center justify-between">
-                    <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-black text-emerald-700">
-                      AR / EN {ar ? "ترجمة" : "CAPTIONS"}
-                    </span>
+                    <div className="flex items-center gap-2"><span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-black text-emerald-700">AR / EN {ar ? "ترجمة" : "CAPTIONS"}</span>{detailed?.remove_music && <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-black text-emerald-700">DMCA Safe • {ar ? "بدون موسيقى" : "No music"}</span>}</div>
                     <span className="text-xs font-bold text-slate-500">
                       {Math.round(clip.end_seconds - clip.start_seconds)}s
                     </span>
@@ -1132,7 +1170,9 @@ export default function Dashboard() {
   );
 
   const thumbSource =
-    detailed?.thumbnail_url || detailed?.clips?.[0]?.thumbnail_url;
+    thumbFormat === "short"
+      ? detailed?.clips?.[0]?.thumbnail_url || detailed?.thumbnail_url
+      : detailed?.thumbnail_url || detailed?.clips?.[0]?.thumbnail_url;
   const thumbnailView = (
     <>
       <SectionTitle
@@ -1141,8 +1181,8 @@ export default function Dashboard() {
         title={ar ? "صانع الثامبنايل" : "Thumbnail Studio"}
         description={
           ar
-            ? "خصّص الإطار والعنوان وشاهد النتيجة مباشرة قبل تحميل الغلاف."
-            : "Customize the frame and headline, then preview the result before download."
+            ? "صمّم غلافًا عاديًا 16:9 للبث أو غلافًا طوليًا 9:16 للشورتات."
+            : "Create a 16:9 VOD cover or a vertical 9:16 cover for Shorts."
         }
       />
       <div className="grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
@@ -1151,6 +1191,31 @@ export default function Dashboard() {
             {ar ? "مصدر الغلاف" : "Thumbnail source"}
             {picker}
           </label>
+          <div className="mt-5">
+            <p className="text-sm font-black">
+              {ar ? "مقاس الصورة" : "Image size"}
+            </p>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setThumbFormat("vod")}
+                className={`rounded-xl border p-3 text-start ${thumbFormat === "vod" ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-slate-200"}`}
+              >
+                <b className="block text-sm">16:9</b>
+                <span className="mt-1 block text-xs text-slate-400">
+                  {ar ? "مقطع عادي · 1280×720" : "Regular VOD · 1280×720"}
+                </span>
+              </button>
+              <button
+                onClick={() => setThumbFormat("short")}
+                className={`rounded-xl border p-3 text-start ${thumbFormat === "short" ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-slate-200"}`}
+              >
+                <b className="block text-sm">9:16</b>
+                <span className="mt-1 block text-xs text-slate-400">
+                  {ar ? "شورت طولي · 1080×1920" : "Vertical Short · 1080×1920"}
+                </span>
+              </button>
+            </div>
+          </div>
           <div className="mt-5">
             <p className="text-sm font-black">
               {ar ? "هوية المنصة" : "Platform frame"}
@@ -1170,24 +1235,6 @@ export default function Dashboard() {
               </button>
             </div>
           </div>
-          <label className="mt-5 block text-sm font-black">
-            {ar ? "عنوان الكبسولة الوسطية" : "Center pill headline"}
-            <input
-              value={thumbHeadline}
-              onChange={(e) => setThumbHeadline(e.target.value)}
-              maxLength={80}
-              className={inputClass}
-            />
-          </label>
-          <label className="mt-5 flex items-center gap-3 rounded-xl bg-slate-50 p-3 text-sm font-bold">
-            <input
-              checked={embedCover}
-              onChange={(e) => setEmbedCover(e.target.checked)}
-              type="checkbox"
-              className="size-5 accent-emerald-500"
-            />
-            {ar ? "تضمين الغلاف في أول 0.8 ثانية" : "Embed cover in first 0.8s"}
-          </label>
           <button
             onClick={saveThumbnail}
             disabled={busy}
@@ -1199,19 +1246,29 @@ export default function Dashboard() {
                 ? "جارٍ الحفظ…"
                 : "Saving…"
               : ar
-                ? "حفظ واستخدام لكل البثوث"
-                : "Save for every recording"}
+                ? thumbFormat === "short"
+                  ? "حفظ غلاف الشورت الطولي"
+                  : "حفظ غلاف البث العادي"
+                : thumbFormat === "short"
+                  ? "Save vertical Short cover"
+                  : "Save regular VOD cover"}
           </button>
-          {branding.default_thumbnail_key && (
+          {(thumbFormat === "short"
+            ? branding.default_short_thumbnail_key
+            : branding.default_thumbnail_key) && (
             <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
               <div className="flex items-center gap-2 text-xs font-black text-emerald-700">
                 <Check size={15} />
                 {ar
-                  ? "الثامبنيل الحالية محفوظة وتُدرج تلقائيًا."
-                  : "Current thumbnail is saved and inserted automatically."}
+                  ? thumbFormat === "short"
+                    ? "غلاف الشورت الطولي محفوظ لبداية الشورتات."
+                    : "غلاف البث العادي محفوظ للأرشيف."
+                  : thumbFormat === "short"
+                    ? "Vertical Short cover is saved for Short intros."
+                    : "Regular VOD cover is saved for the archive."}
               </div>
               <button
-                onClick={deleteThumbnail}
+                onClick={() => deleteThumbnail(thumbFormat)}
                 className="mt-2 text-xs font-black text-rose-600"
               >
                 {ar ? "إزالة الثامبنيل المحفوظة" : "Remove saved thumbnail"}
@@ -1224,10 +1281,12 @@ export default function Dashboard() {
             <h2 className="font-black">
               {ar ? "المعاينة الحية" : "Live preview"}
             </h2>
-            <span className="text-xs text-slate-400">1920 × 1080</span>
+            <span className="text-xs text-slate-400">
+              {thumbFormat === "short" ? "1080 × 1920" : "1280 × 720"}
+            </span>
           </div>
           <div
-            className={`relative aspect-video overflow-hidden rounded-2xl border-[5px] bg-slate-950 shadow-xl ${thumbPlatform === "twitch" ? "border-[#9146FF] shadow-violet-500/20" : "border-[#53FC18] shadow-lime-500/20"}`}
+            className={`relative mx-auto overflow-hidden rounded-2xl border-[5px] bg-slate-950 shadow-xl ${thumbFormat === "short" ? "aspect-[9/16] max-h-[680px]" : "aspect-video w-full"} ${thumbPlatform === "twitch" ? "border-[#9146FF] shadow-violet-500/20" : "border-[#53FC18] shadow-lime-500/20"}`}
           >
             {thumbSource ? (
               <img
@@ -1241,14 +1300,8 @@ export default function Dashboard() {
             <span
               className={`absolute start-4 top-4 rounded-lg px-3 py-1.5 text-xs font-black text-white ${thumbPlatform === "twitch" ? "bg-[#9146FF]" : "bg-[#20b94b]"}`}
             >
-              {thumbPlatform.toUpperCase()} · VOD
+              {thumbPlatform.toUpperCase()} · KLIPR
             </span>
-            <div className="absolute inset-x-6 bottom-[18%] text-center">
-              <span className="inline-block max-w-full rounded-full bg-slate-950/85 px-7 py-3 text-lg font-black text-white shadow-2xl sm:text-2xl">
-                {thumbHeadline ||
-                  (ar ? "عنوان الثامبنايل" : "THUMBNAIL HEADLINE")}
-              </span>
-            </div>
           </div>
         </section>
       </div>
@@ -1285,6 +1338,10 @@ export default function Dashboard() {
               }
               className="size-5 accent-emerald-500"
             />
+          </label>
+          <label className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+            <input type="checkbox" checked={branding.remove_music} onChange={(e) => setBranding({ ...branding, remove_music: e.target.checked })} className="mt-1 size-5 accent-emerald-500" />
+            <span><span className="block font-black">{ar ? "إزالة الأغاني وموسيقى الدونيشن تلقائياً (DMCA Safe)" : "Remove donation songs & music automatically (DMCA Safe)"}</span><span className="mt-1 block text-xs font-normal leading-5 text-slate-600">{ar ? "إعداد افتراضي للتسجيلات الجديدة: تُزال الموسيقى مع الحفاظ على صوت الستريمر." : "Default for new recordings: music is removed while the streamer voice remains clear."}</span></span>
           </label>
           <label className="block text-sm font-black">
             {ar

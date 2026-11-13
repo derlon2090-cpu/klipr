@@ -127,6 +127,10 @@ def render_vertical(vod: Path, ass: Path, window: Window, destination: Path, lay
     graph = build_filter_graph(ass, layout_mode, find_facecam_crop(vod, window) if layout_mode == "split" else None)
     run(["ffmpeg", "-y", "-ss", f"{window.start:.3f}", "-t", f"{window.end-window.start:.3f}", "-i", str(vod), "-filter_complex", graph, "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-c:a", "aac", "-movflags", "+faststart", str(destination)])
 
+def add_intro_thumbnail(video: Path, thumbnail: Path, destination: Path) -> None:
+    """Show the saved 9:16 cover over the opening 0.8 seconds."""
+    run(["ffmpeg", "-y", "-i", str(video), "-loop", "1", "-i", str(thumbnail), "-filter_complex", "[1:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[cover];[0:v][cover]overlay=0:0:enable='lt(t,0.8)'[v]", "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-c:a", "copy", "-shortest", "-movflags", "+faststart", str(destination)])
+
 @shared_task
 def process_stream_highlights(stream_id: str, max_clips: int = 3) -> None:
     sid = UUID(stream_id)
@@ -136,12 +140,16 @@ def process_stream_highlights(stream_id: str, max_clips: int = 3) -> None:
             raise ValueError("A completed master VOD is required")
         master_key = stream.master_key
         layout_mode, webhook_url = stream.layout_mode, stream.discord_webhook_url
-        target_seconds, headline, embed_intro, platform = stream.target_clip_duration, stream.custom_headline or "", stream.embed_intro_cover, stream.platform
+        target_seconds, headline, embed_intro, platform, short_thumbnail_key = stream.target_clip_duration, stream.custom_headline or "", stream.embed_intro_cover, stream.platform, stream.short_thumbnail_key
     job_dir = WORK_ROOT / stream_id / "highlight-processing"
     vod, wav = job_dir / "master.mp4", job_dir / "audio.wav"
     _set_status(sid, StreamStatus.processing)
     try:
         download_file(master_key, vod)
+        intro_thumbnail = None
+        if embed_intro and short_thumbnail_key:
+            intro_thumbnail = job_dir / f"intro-thumbnail{Path(short_thumbnail_key).suffix or '.png'}"
+            download_file(short_thumbnail_key, intro_thumbnail)
         extract_audio(vod, wav)
         energy, duration = rms_windows(wav)
         words = transcribe(wav)
@@ -151,7 +159,12 @@ def process_stream_highlights(stream_id: str, max_clips: int = 3) -> None:
             for index, window in enumerate(windows, 1):
                 ass, output = job_dir / f"highlight-{index}.ass", job_dir / f"highlight-{index}.mp4"
                 snippet = write_ass(words, window.start, window.end, ass)
-                render_vertical(vod, ass, window, output, layout_mode)
+                if intro_thumbnail:
+                    raw_output = job_dir / f"highlight-{index}-raw.mp4"
+                    render_vertical(vod, ass, window, raw_output, layout_mode)
+                    add_intro_thumbnail(raw_output, intro_thumbnail, output)
+                else:
+                    render_vertical(vod, ass, window, output, layout_mode)
                 key = f"clips/{stream_id}/highlight-{index}.mp4"
                 upload_file(output, key, "video/mp4")
                 from .thumbnails import make_thumbnail

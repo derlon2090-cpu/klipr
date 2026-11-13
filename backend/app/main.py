@@ -9,7 +9,7 @@ from html import unescape
 from urllib.request import HTTPRedirectHandler, Request as UrlRequest, build_opener
 from urllib.parse import urlparse, urlunparse
 from uuid import UUID
-from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import func, text
@@ -201,20 +201,24 @@ def stream_data(stream: Stream, clips: list[Clip] | None = None) -> dict:
 @app.get("/health")
 def health(): return {"ok": True}
 
-def _branding(db):
+def _ensure_preset_schema(db):
     # Lazy, idempotent upgrade keeps existing deployments compatible without
     # making serverless startup depend on a database connection.
     if db.bind.dialect.name == "postgresql":
         db.execute(text("ALTER TABLE archive_branding ADD COLUMN IF NOT EXISTS default_thumbnail_key TEXT"))
+        db.execute(text("ALTER TABLE archive_branding ADD COLUMN IF NOT EXISTS default_short_thumbnail_key TEXT"))
         db.execute(text("ALTER TABLE archive_branding ADD COLUMN IF NOT EXISTS use_default_thumbnail BOOLEAN NOT NULL DEFAULT TRUE"))
+        db.execute(text("ALTER TABLE streams ADD COLUMN IF NOT EXISTS short_thumbnail_key TEXT"))
         db.commit()
+def _branding(db):
+    _ensure_preset_schema(db)
     item = db.get(ArchiveBranding, 1)
     if not item: item = ArchiveBranding(id=1); db.add(item); db.commit(); db.refresh(item)
     return item
 @app.get("/branding")
 def get_branding():
     with SessionLocal() as db:
-        item = _branding(db); return {"enable_end_screen":item.enable_end_screen,"use_default_thumbnail":item.use_default_thumbnail,"outro_duration_seconds":item.outro_duration_seconds,"archive_channel_name":item.archive_channel_name,"archive_tagline":item.archive_tagline,"archive_logo_key":item.archive_logo_key,"archive_logo_url":presigned_download_url(item.archive_logo_key) if item.archive_logo_key else None,"default_thumbnail_key":item.default_thumbnail_key,"default_thumbnail_url":presigned_download_url(item.default_thumbnail_key) if item.default_thumbnail_key else None,"default_left_vod_id":item.default_left_vod_id,"default_right_vod_id":item.default_right_vod_id}
+        item = _branding(db); return {"enable_end_screen":item.enable_end_screen,"use_default_thumbnail":item.use_default_thumbnail,"outro_duration_seconds":item.outro_duration_seconds,"archive_channel_name":item.archive_channel_name,"archive_tagline":item.archive_tagline,"archive_logo_key":item.archive_logo_key,"archive_logo_url":presigned_download_url(item.archive_logo_key) if item.archive_logo_key else None,"default_thumbnail_key":item.default_thumbnail_key,"default_thumbnail_url":presigned_download_url(item.default_thumbnail_key) if item.default_thumbnail_key else None,"default_short_thumbnail_key":item.default_short_thumbnail_key,"default_short_thumbnail_url":presigned_download_url(item.default_short_thumbnail_key) if item.default_short_thumbnail_key else None,"default_left_vod_id":item.default_left_vod_id,"default_right_vod_id":item.default_right_vod_id}
 @app.put("/branding")
 def put_branding(payload: BrandingRequest):
     if not 10 <= payload.outro_duration_seconds <= 20: raise HTTPException(422,"outro_duration_seconds must be between 10 and 20")
@@ -247,27 +251,35 @@ def delete_branding_logo():
     if old: delete_files([old])
 
 @app.post("/branding/thumbnail")
-async def upload_branding_thumbnail(file: UploadFile = File(...)):
+async def upload_branding_thumbnail(file: UploadFile = File(...), kind: str = Form("vod")):
+    if kind not in {"vod", "short"}: raise HTTPException(422,"kind must be vod or short")
     data = await file.read()
     is_png, is_jpg, is_webp = data.startswith(b"\x89PNG\r\n\x1a\n"), data.startswith(b"\xff\xd8\xff"), data.startswith(b"RIFF") and data[8:12] == b"WEBP"
     if len(data) > 8*1024*1024 or not (is_png or is_jpg or is_webp): raise HTTPException(422,"Thumbnail must be a PNG, JPG, or WebP under 8MB")
     import tempfile
     suffix = ".png" if is_png else ".jpg" if is_jpg else ".webp"
     content_type = "image/png" if is_png else "image/jpeg" if is_jpg else "image/webp"
-    key = f"branding/thumbnail_{secrets.token_hex(12)}{suffix}"
+    key = f"branding/{kind}_thumbnail_{secrets.token_hex(12)}{suffix}"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temp: temp.write(data); path = Path(temp.name)
     try:
         upload_file(path,key,content_type)
         with SessionLocal() as db:
-            item=_branding(db); old=item.default_thumbnail_key; item.default_thumbnail_key=key; item.use_default_thumbnail=True; db.commit()
+            item=_branding(db)
+            field = "default_short_thumbnail_key" if kind == "short" else "default_thumbnail_key"
+            old=getattr(item, field); setattr(item, field, key)
+            if kind == "vod": item.use_default_thumbnail=True
+            db.commit()
         if old: delete_files([old])
     finally: path.unlink(missing_ok=True)
-    return {"default_thumbnail_key":key,"default_thumbnail_url":presigned_download_url(key),"use_default_thumbnail":True}
+    return {"kind":kind,"key":key,"url":presigned_download_url(key),"use_default_thumbnail":item.use_default_thumbnail}
 
 @app.delete("/branding/thumbnail", status_code=204)
-def delete_branding_thumbnail():
+def delete_branding_thumbnail(kind: str = "vod"):
+    if kind not in {"vod", "short"}: raise HTTPException(422,"kind must be vod or short")
     with SessionLocal() as db:
-        item = _branding(db); old = item.default_thumbnail_key; item.default_thumbnail_key = None; item.use_default_thumbnail = False; db.commit()
+        item = _branding(db); field = "default_short_thumbnail_key" if kind == "short" else "default_thumbnail_key"; old = getattr(item, field); setattr(item, field, None)
+        if kind == "vod": item.use_default_thumbnail = False
+        db.commit()
     if old: delete_files([old])
 
 
@@ -350,6 +362,10 @@ def record(payload: RecordRequest, request: Request):
                 suffix = Path(branding.archive_logo_key).suffix or ".png"
                 stream.archive_logo_key = f"streams/{stream.id}/archive-logo{suffix}"
                 copy_file(branding.archive_logo_key, stream.archive_logo_key)
+            if branding.default_short_thumbnail_key:
+                suffix = Path(branding.default_short_thumbnail_key).suffix or ".png"
+                stream.short_thumbnail_key = f"streams/{stream.id}/short-thumbnail{suffix}"
+                copy_file(branding.default_short_thumbnail_key, stream.short_thumbnail_key)
             db.commit(); db.refresh(stream)
             if not _reserve_recording_slot(owner_key, str(stream.id)):
                 db.delete(stream); db.commit()
@@ -370,6 +386,7 @@ def stream_preview(payload: PreviewRequest):
 @app.get("/streams")
 def list_streams():
     with SessionLocal() as db:
+        _ensure_preset_schema(db)
         streams = db.query(Stream).order_by(Stream.created_at.desc()).all()
         counts = dict(db.query(Clip.stream_id, func.count(Clip.id)).group_by(Clip.stream_id).all())
         return [{**stream_data(stream), "clip_count": counts.get(stream.id, 0)} for stream in streams]
@@ -409,6 +426,12 @@ def process_stream(stream_id: UUID, payload: ProcessRequest = ProcessRequest()):
         if not 1 <= payload.max_clips <= 10: raise HTTPException(422, "max_clips must be between 1 and 10")
         if payload.custom_headline is not None: stream.custom_headline = payload.custom_headline.strip()[:160] or None
         if payload.embed_intro_cover is not None: stream.embed_intro_cover = payload.embed_intro_cover
+        if payload.embed_intro_cover:
+            branding = _branding(db)
+            if branding.default_short_thumbnail_key:
+                suffix = Path(branding.default_short_thumbnail_key).suffix or ".png"
+                stream.short_thumbnail_key = f"streams/{stream.id}/short-thumbnail{suffix}"
+                copy_file(branding.default_short_thumbnail_key, stream.short_thumbnail_key)
         db.commit()
     # Keep the Vercel API package lean; the Whisper worker imports this only in its own container.
     from app.worker.highlights import process_stream_highlights
@@ -428,7 +451,7 @@ def delete_recording(stream_id: UUID):
         stream = db.get(Stream, stream_id)
         if stream is None: raise HTTPException(404, "Stream not found")
         clips = db.query(Clip).filter(Clip.stream_id == stream_id).all()
-        keys = [key for key in [stream.master_key, stream.thumbnail_key, stream.archive_logo_key] + [value for clip in clips for value in (clip.vertical_key, clip.thumbnail_key, clip.captions_key)] if key]
+        keys = [key for key in [stream.master_key, stream.thumbnail_key, stream.short_thumbnail_key, stream.archive_logo_key] + [value for clip in clips for value in (clip.vertical_key, clip.thumbnail_key, clip.captions_key)] if key]
         source_url = stream.source_url
         try:
             from app.worker.celery_app import celery_app
