@@ -103,6 +103,8 @@ class RecordRequest(BaseModel):
     stream_url: str
     layout_mode: str = "center"
     discord_webhook_url: str | None = None
+    custom_headline: str | None = None
+    enable_end_screen: bool = True
 class PreviewRequest(BaseModel): stream_url: str
 class ProcessRequest(BaseModel):
     layout_mode: str | None = None
@@ -205,7 +207,7 @@ def _branding(db):
 @app.get("/branding")
 def get_branding():
     with SessionLocal() as db:
-        item = _branding(db); return {"enable_end_screen":item.enable_end_screen,"outro_duration_seconds":item.outro_duration_seconds,"archive_channel_name":item.archive_channel_name,"archive_tagline":item.archive_tagline,"archive_logo_key":item.archive_logo_key,"default_left_vod_id":item.default_left_vod_id,"default_right_vod_id":item.default_right_vod_id}
+        item = _branding(db); return {"enable_end_screen":item.enable_end_screen,"outro_duration_seconds":item.outro_duration_seconds,"archive_channel_name":item.archive_channel_name,"archive_tagline":item.archive_tagline,"archive_logo_key":item.archive_logo_key,"archive_logo_url":presigned_download_url(item.archive_logo_key) if item.archive_logo_key else None,"default_left_vod_id":item.default_left_vod_id,"default_right_vod_id":item.default_right_vod_id}
 @app.put("/branding")
 def put_branding(payload: BrandingRequest):
     if not 10 <= payload.outro_duration_seconds <= 20: raise HTTPException(422,"outro_duration_seconds must be between 10 and 20")
@@ -229,7 +231,7 @@ async def upload_branding_logo(file: UploadFile = File(...)):
             item=_branding(db); old=item.archive_logo_key; item.archive_logo_key=key; db.commit()
         if old: delete_files([old])
     finally: path.unlink(missing_ok=True)
-    return {"archive_logo_key":key}
+    return {"archive_logo_key":key,"archive_logo_url":presigned_download_url(key)}
 
 @app.delete("/branding/logo", status_code=204)
 def delete_branding_logo():
@@ -306,7 +308,7 @@ def record(payload: RecordRequest, request: Request):
         raise HTTPException(409, {"detail": "This URL is already recording", "stream_id": existing})
     try:
         with SessionLocal() as db:
-            stream = Stream(channel_id=None, source_url=normalized, platform=platform, status=StreamStatus.queued, layout_mode=layout_mode, discord_webhook_url=webhook)
+            stream = Stream(channel_id=None, source_url=normalized, platform=platform, status=StreamStatus.queued, layout_mode=layout_mode, discord_webhook_url=webhook, custom_headline=(payload.custom_headline or "").strip()[:160] or None, enable_end_screen=payload.enable_end_screen)
             db.add(stream); db.commit(); db.refresh(stream)
             if not _reserve_recording_slot(owner_key, str(stream.id)):
                 db.delete(stream); db.commit()
