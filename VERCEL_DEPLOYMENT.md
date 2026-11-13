@@ -11,6 +11,7 @@ The API uses `backend/requirements.txt`, which deliberately excludes `faster-whi
 1. In the import screen shown, keep **Application Preset: Services** and import the multi-service project.
 2. Add `NEXT_PUBLIC_API_URL=/api` to Vercel's Production, Preview, and Development environment variables.
 3. Add the production values for `DATABASE_URL`, `REDIS_URL`, and the R2 variables from `.env.example` to the **api** service.
+4. Add `KLIPR_ACCESS_PASSWORD` and a long random `KLIPR_SESSION_SECRET` to the **api** service. These are server-only values; do not use `NEXT_PUBLIC_` prefixes or commit them. Set `KLIPR_SECURE_COOKIES=true` for Vercel.
 
 ## Required worker deployment
 

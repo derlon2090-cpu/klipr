@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     whisper_device: str = "cpu"
     whisper_compute_type: str = "int8"
     r2_presigned_url_ttl_seconds: int = 3600
+    klipr_access_password: str = ""
+    klipr_session_secret: str = ""
+    klipr_allowed_email: str = "klipr.cloud@gmail.com"
+    klipr_secure_cookies: bool = False
 
 
 @lru_cache
