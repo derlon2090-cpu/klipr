@@ -113,6 +113,10 @@ class PreviewRequest(BaseModel): stream_url: str
 class ProcessRequest(BaseModel):
     layout_mode: str | None = None
     discord_webhook_url: str | None = None
+    duration_seconds: int | None = None
+    max_clips: int = 3
+    custom_headline: str | None = None
+    embed_intro_cover: bool | None = None
 class PasswordRequest(BaseModel): password: str
 class EmailRequest(BaseModel): email: str
 
@@ -184,10 +188,10 @@ def preview_stream(platform: str, normalized_url: str) -> dict:
 def stream_data(stream: Stream, clips: list[Clip] | None = None) -> dict:
     result = {"id": str(stream.id), "source_url": stream.source_url, "platform": stream.platform, "status": stream.status,
               "master_url": presigned_download_url(stream.master_key) if stream.master_key else None, "started_at": stream.started_at,
-              "ended_at": stream.ended_at, "error": stream.error_message, "stop_requested": stream.stop_requested, "layout_mode": stream.layout_mode}
+              "ended_at": stream.ended_at, "error": stream.error_message, "stop_requested": stream.stop_requested, "layout_mode": stream.layout_mode, "thumbnail_url": presigned_download_url(stream.thumbnail_key) if stream.thumbnail_key else None, "target_clip_duration": stream.target_clip_duration}
     if clips is not None:
         result["clips"] = [{"id": str(c.id), "start_seconds": c.start_seconds, "end_seconds": c.end_seconds, "score": c.score,
-                            "transcript": c.transcript, "url": presigned_download_url(c.vertical_key) if c.vertical_key else None} for c in clips]
+                            "transcript": c.transcript, "url": presigned_download_url(c.vertical_key) if c.vertical_key else None, "thumbnail_url": presigned_download_url(c.thumbnail_key) if c.thumbnail_key else None} for c in clips]
     return result
 
 @app.get("/health")
@@ -303,8 +307,18 @@ def process_stream(stream_id: UUID, payload: ProcessRequest = ProcessRequest()):
             layout, webhook = validate_creator_options(payload.layout_mode or stream.layout_mode, payload.discord_webhook_url)
             stream.layout_mode = layout
             if payload.discord_webhook_url is not None: stream.discord_webhook_url = webhook
-            db.commit()
+        if payload.duration_seconds is not None:
+            if not 10 <= payload.duration_seconds <= 180: raise HTTPException(422, "duration_seconds must be between 10 and 180")
+            stream.target_clip_duration = payload.duration_seconds
+        if not 1 <= payload.max_clips <= 10: raise HTTPException(422, "max_clips must be between 1 and 10")
+        if payload.custom_headline is not None: stream.custom_headline = payload.custom_headline.strip()[:160] or None
+        if payload.embed_intro_cover is not None: stream.embed_intro_cover = payload.embed_intro_cover
+        db.commit()
     # Keep the Vercel API package lean; the Whisper worker imports this only in its own container.
     from app.worker.highlights import process_stream_highlights
-    process_stream_highlights.delay(str(stream_id))
+    process_stream_highlights.delay(str(stream_id), payload.max_clips)
     return {"id": str(stream_id), "status": StreamStatus.processing}
+
+@app.post("/recordings/{stream_id}/clips/generate", status_code=202)
+def generate_custom_clips(stream_id: UUID, payload: ProcessRequest):
+    return process_stream(stream_id, payload)

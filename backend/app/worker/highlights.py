@@ -47,12 +47,12 @@ def transcribe(wav: Path) -> list[Word]:
     segments, _ = model.transcribe(str(wav), word_timestamps=True, vad_filter=True)
     return [Word(word.start, word.end, word.word.strip()) for segment in segments for word in (segment.words or [])]
 
-def choose_windows(energy: list[float], duration: float, words: list[Word]) -> list[Window]:
+def choose_windows(energy: list[float], duration: float, words: list[Word], target_seconds: int = 45, max_clips: int = 3) -> list[Window]:
     candidates: list[Window] = []
     for index in range(len(energy)):
         center = index * 5 + 2.5
-        start = max(0.0, min(center - 22.5, max(0.0, duration - 45)))
-        end = min(duration, start + 45)
+        start = max(0.0, min(center - target_seconds / 2, max(0.0, duration - target_seconds)))
+        end = min(duration, start + target_seconds)
         rms = float(np.mean(energy[int(start // 5):int(math.ceil(end / 5))] or [0.0]))
         density = min(sum(word.start < end and word.end > start for word in words) / max(end - start, 1), 4) / 4
         candidates.append(Window(start, end, 0.75 * rms + 0.25 * density))
@@ -60,7 +60,7 @@ def choose_windows(energy: list[float], duration: float, words: list[Word]) -> l
     for candidate in sorted(candidates, key=lambda item: item.score, reverse=True):
         if all(candidate.end <= item.start or candidate.start >= item.end for item in chosen):
             chosen.append(candidate)
-        if len(chosen) == 3:
+        if len(chosen) == max_clips:
             break
     return sorted(chosen, key=lambda item: item.start)
 
@@ -128,7 +128,7 @@ def render_vertical(vod: Path, ass: Path, window: Window, destination: Path, lay
     run(["ffmpeg", "-y", "-ss", f"{window.start:.3f}", "-t", f"{window.end-window.start:.3f}", "-i", str(vod), "-filter_complex", graph, "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-c:a", "aac", "-movflags", "+faststart", str(destination)])
 
 @shared_task
-def process_stream_highlights(stream_id: str) -> None:
+def process_stream_highlights(stream_id: str, max_clips: int = 3) -> None:
     sid = UUID(stream_id)
     with SessionLocal() as db:
         stream = db.get(Stream, sid)
@@ -136,6 +136,7 @@ def process_stream_highlights(stream_id: str) -> None:
             raise ValueError("A completed master VOD is required")
         master_key = stream.master_key
         layout_mode, webhook_url = stream.layout_mode, stream.discord_webhook_url
+        target_seconds, headline, embed_intro, platform = stream.target_clip_duration, stream.custom_headline or "", stream.embed_intro_cover, stream.platform
     job_dir = WORK_ROOT / stream_id / "highlight-processing"
     vod, wav = job_dir / "master.mp4", job_dir / "audio.wav"
     _set_status(sid, StreamStatus.processing)
@@ -144,7 +145,7 @@ def process_stream_highlights(stream_id: str) -> None:
         extract_audio(vod, wav)
         energy, duration = rms_windows(wav)
         words = transcribe(wav)
-        windows = choose_windows(energy, duration, words)
+        windows = choose_windows(energy, duration, words, target_seconds, max_clips)
         with SessionLocal() as db:
             db.query(Clip).filter(Clip.stream_id == sid).delete()
             for index, window in enumerate(windows, 1):
@@ -153,7 +154,10 @@ def process_stream_highlights(stream_id: str) -> None:
                 render_vertical(vod, ass, window, output, layout_mode)
                 key = f"clips/{stream_id}/highlight-{index}.mp4"
                 upload_file(output, key, "video/mp4")
-                db.add(Clip(stream_id=sid, start_seconds=window.start, end_seconds=window.end, score=window.score, vertical_key=key, transcript=snippet))
+                from .thumbnails import make_thumbnail
+                cover = job_dir / f"highlight-{index}.png"; make_thumbnail(None, cover, platform, "CLIP", headline or snippet[:42], portrait=True)
+                thumb_key = f"clips/{stream_id}/highlight-{index}.png"; upload_file(cover, thumb_key, "image/png")
+                db.add(Clip(stream_id=sid, start_seconds=window.start, end_seconds=window.end, score=window.score, vertical_key=key, thumbnail_key=thumb_key, transcript=snippet))
             db.commit()
         _set_status(sid, StreamStatus.ready)
         send_discord_notification(stream_id, webhook_url, len(windows))
