@@ -1,0 +1,7 @@
+# Local Docker/worker artifacts are deployed to persistent worker hosts, not Vercel Services.
+docker-compose.yml
+frontend/Dockerfile
+backend/Dockerfile
+backend/Dockerfile.worker
+backend/.dockerignore
+frontend/.dockerignore
