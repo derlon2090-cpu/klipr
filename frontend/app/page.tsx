@@ -50,7 +50,7 @@ export default function AccessPage() {
         <div className="mb-8 text-center">
           <span className="inline-flex items-center gap-2 text-sm font-bold text-emerald-300"><ShieldCheck size={17} />{email ? "التحقق من البريد" : "وصول محمي"}</span>
           <h2 className="mt-3 text-2xl font-black">{email ? "أدخل بريدك المعتمد" : "أدخل كلمة المرور"}</h2>
-          <p className="mt-2 text-sm leading-6 text-zinc-500">{email ? "نحتاج تأكيد الهوية قبل فتح لوحة Klipr." : "ثلاث محاولات خاطئة توقف الوصول لمدة 3 دقائق."}</p>
+          {email && <p className="mt-2 text-sm leading-6 text-zinc-500">نحتاج تأكيد الهوية قبل فتح لوحة Klipr.</p>}
         </div>
         <form onSubmit={submit}>
           <label className="mb-2 block text-sm font-bold text-zinc-300">{email ? "البريد الإلكتروني" : "كلمة المرور"}</label>
