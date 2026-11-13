@@ -4,12 +4,15 @@ import hmac
 import json
 import secrets
 import time
+import re
+from html import unescape
+from urllib.request import HTTPRedirectHandler, Request as UrlRequest, build_opener
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse, urlunparse
 from uuid import UUID
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import AnyHttpUrl, BaseModel
+from pydantic import BaseModel
 from sqlalchemy import func
 from app.db import Base, engine, SessionLocal
 from app.config import get_settings
@@ -102,9 +105,33 @@ async def require_klipr_session(request: Request, call_next):
         return await call_next(request)
     return Response(content=json.dumps({"detail": "Authentication required"}), status_code=401, media_type="application/json")
 
-class RecordRequest(BaseModel): stream_url: AnyHttpUrl
+class RecordRequest(BaseModel):
+    stream_url: str
+    layout_mode: str = "center"
+    discord_webhook_url: str | None = None
+class PreviewRequest(BaseModel): stream_url: str
+class ProcessRequest(BaseModel):
+    layout_mode: str | None = None
+    discord_webhook_url: str | None = None
 class PasswordRequest(BaseModel): password: str
 class EmailRequest(BaseModel): email: str
+
+WEBHOOK_RE = re.compile(r"^https://(?:discord\.com|discordapp\.com)/api/webhooks/[0-9]+/[A-Za-z0-9_-]+(?:\?.*)?$")
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+def safe_urlopen(request: UrlRequest):
+    """Metadata fetches never follow a provider redirect to an unvalidated host."""
+    return build_opener(_NoRedirect).open(request, timeout=8)
+
+def validate_creator_options(layout_mode: str, webhook: str | None) -> tuple[str, str | None]:
+    if layout_mode not in {"center", "split"}:
+        raise HTTPException(422, "layout_mode must be center or split")
+    if webhook and not WEBHOOK_RE.fullmatch(webhook):
+        raise HTTPException(422, "Discord webhook must use the official HTTPS webhook endpoint")
+    return layout_mode, webhook
 
 def normalize_live_url(value: str) -> tuple[str, str]:
     parsed = urlparse(value)
@@ -124,10 +151,40 @@ def normalize_live_url(value: str) -> tuple[str, str]:
     if not path or path == "/": raise HTTPException(422, "A creator channel path is required")
     return platform, urlunparse(("https", host, path, "", "", ""))
 
+def _meta_tag(page: str, property_name: str) -> str | None:
+    # Provider page is not trusted markup; return only a bounded, decoded meta value.
+    match = re.search(r'<meta[^>]+(?:property|name)=["\']' + re.escape(property_name) + r'["\'][^>]+content=["\']([^"\']+)', page, re.I)
+    return unescape(match.group(1)).strip()[:500] if match else None
+
+def preview_stream(platform: str, normalized_url: str) -> dict:
+    handle = urlparse(normalized_url).path.strip("/").split("/", 1)[0]
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", handle):
+        raise HTTPException(422, "Invalid creator channel path")
+    try:
+        if platform == "kick":
+            endpoint = f"https://kick.com/api/v2/channels/{handle}"
+            request = UrlRequest(endpoint, headers={"User-Agent": "Klipr.cloud preview/1.0", "Accept": "application/json"})
+            with safe_urlopen(request) as response:
+                data = json.loads(response.read(1_000_000))
+            livestream = data.get("livestream") or {}
+            return {"platform": platform, "streamer_name": data.get("user", {}).get("username") or data.get("slug") or handle,
+                    "title": livestream.get("session_title") or data.get("stream_title") or "", "live": bool(livestream),
+                    "thumbnail_url": livestream.get("thumbnail") or data.get("profile_pic")}
+        request = UrlRequest(normalized_url, headers={"User-Agent": "Mozilla/5.0 (compatible; Klipr.cloud preview/1.0)"})
+        with safe_urlopen(request) as response:
+            page = response.read(1_000_000).decode("utf-8", "replace")
+        title = _meta_tag(page, "og:title") or handle
+        image = _meta_tag(page, "og:image")
+        # Twitch exposes this marker on live channel pages; absent is conservatively offline.
+        live = 'isLiveBroadcast' in page or '"isLive":true' in page
+        return {"platform": platform, "streamer_name": title.split(" - ")[0][:100], "title": title, "live": live, "thumbnail_url": image}
+    except Exception as error:
+        raise HTTPException(502, "Could not retrieve live stream metadata") from error
+
 def stream_data(stream: Stream, clips: list[Clip] | None = None) -> dict:
     result = {"id": str(stream.id), "source_url": stream.source_url, "platform": stream.platform, "status": stream.status,
               "master_url": presigned_download_url(stream.master_key) if stream.master_key else None, "started_at": stream.started_at,
-              "ended_at": stream.ended_at, "error": stream.error_message, "stop_requested": stream.stop_requested}
+              "ended_at": stream.ended_at, "error": stream.error_message, "stop_requested": stream.stop_requested, "layout_mode": stream.layout_mode}
     if clips is not None:
         result["clips"] = [{"id": str(c.id), "start_seconds": c.start_seconds, "end_seconds": c.end_seconds, "score": c.score,
                             "transcript": c.transcript, "url": presigned_download_url(c.vertical_key) if c.vertical_key else None} for c in clips]
@@ -183,7 +240,8 @@ def logout(response: Response):
 
 @app.post("/streams/record", status_code=202)
 def record(payload: RecordRequest, request: Request):
-    platform, normalized = normalize_live_url(str(payload.stream_url))
+    platform, normalized = normalize_live_url(payload.stream_url)
+    layout_mode, webhook = validate_creator_options(payload.layout_mode, payload.discord_webhook_url)
     owner_key = _consume_record_quota(request)
     client, lock = redis_client(), active_key(normalized)
     if not client.set(lock, "pending", nx=True, ex=43200):
@@ -191,7 +249,7 @@ def record(payload: RecordRequest, request: Request):
         raise HTTPException(409, {"detail": "This URL is already recording", "stream_id": existing})
     try:
         with SessionLocal() as db:
-            stream = Stream(channel_id=None, source_url=normalized, platform=platform, status=StreamStatus.queued)
+            stream = Stream(channel_id=None, source_url=normalized, platform=platform, status=StreamStatus.queued, layout_mode=layout_mode, discord_webhook_url=webhook)
             db.add(stream); db.commit(); db.refresh(stream)
             if not _reserve_recording_slot(owner_key, str(stream.id)):
                 db.delete(stream); db.commit()
@@ -203,6 +261,11 @@ def record(payload: RecordRequest, request: Request):
         client.delete(lock)
         if "stream" in locals(): client.srem(owner_key, str(stream.id))
         raise
+
+@app.post("/streams/preview")
+def stream_preview(payload: PreviewRequest):
+    platform, normalized = normalize_live_url(payload.stream_url)
+    return preview_stream(platform, normalized)
 
 @app.get("/streams")
 def list_streams():
@@ -231,11 +294,16 @@ def stop_recording(stream_id: UUID):
     return {"id": str(stream_id), "status": "stopping"}
 
 @app.post("/streams/{stream_id}/process", status_code=202)
-def process_stream(stream_id: UUID):
+def process_stream(stream_id: UUID, payload: ProcessRequest = ProcessRequest()):
     with SessionLocal() as db:
         stream = db.get(Stream, stream_id)
         if stream is None: raise HTTPException(404, "Stream not found")
         if not stream.master_key: raise HTTPException(409, "The master VOD is not ready")
+        if payload.layout_mode is not None or payload.discord_webhook_url is not None:
+            layout, webhook = validate_creator_options(payload.layout_mode or stream.layout_mode, payload.discord_webhook_url)
+            stream.layout_mode = layout
+            if payload.discord_webhook_url is not None: stream.discord_webhook_url = webhook
+            db.commit()
     # Keep the Vercel API package lean; the Whisper worker imports this only in its own container.
     from app.worker.highlights import process_stream_highlights
     process_stream_highlights.delay(str(stream_id))
