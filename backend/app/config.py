@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-    database_url: str
+    database_url: str | None = None
     redis_url: str = "redis://localhost:6379/0"
     r2_endpoint_url: str | None = None
     r2_access_key_id: str | None = None
