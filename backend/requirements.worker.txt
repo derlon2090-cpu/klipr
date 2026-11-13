@@ -1,0 +1,5 @@
+# Persistent media worker dependencies. Do not install these in Vercel Functions.
+-r requirements.txt
+streamlink==7.1.2
+faster-whisper==1.1.0
+numpy==2.2.0

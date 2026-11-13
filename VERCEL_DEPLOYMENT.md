@@ -4,6 +4,8 @@ This repository is a Vercel Services monorepo. `vercel.json` deploys the Next.js
 
 The repository's Dockerfiles are intentionally excluded from the Vercel upload via `.vercelignore`. They remain available for local Docker Compose use and for the persistent Celery worker host; excluding them prevents Vercel from classifying either HTTP service as a generic Container instead of its explicitly configured framework.
 
+The API uses `backend/requirements.txt`, which deliberately excludes `faster-whisper`, NumPy, and Streamlink so the Vercel Function stays below its bundle-size limit. The persistent worker installs `backend/requirements.worker.txt`, which includes those media dependencies.
+
 ## Import settings
 
 1. In the import screen shown, keep **Application Preset: Services** and import the multi-service project.

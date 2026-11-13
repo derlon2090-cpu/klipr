@@ -8,7 +8,6 @@ from sqlalchemy import func
 from app.db import Base, engine, SessionLocal
 from app.models import Clip, Stream, StreamStatus
 from app.storage import presigned_download_url
-from app.worker.highlights import process_stream_highlights
 from app.worker.tasks import active_key, record_stream, redis_client, stop_key
 
 @asynccontextmanager
@@ -100,5 +99,7 @@ def process_stream(stream_id: UUID):
         stream = db.get(Stream, stream_id)
         if stream is None: raise HTTPException(404, "Stream not found")
         if not stream.master_key: raise HTTPException(409, "The master VOD is not ready")
+    # Keep the Vercel API package lean; the Whisper worker imports this only in its own container.
+    from app.worker.highlights import process_stream_highlights
     process_stream_highlights.delay(str(stream_id))
     return {"id": str(stream_id), "status": StreamStatus.processing}
