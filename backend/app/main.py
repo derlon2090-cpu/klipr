@@ -105,6 +105,7 @@ class RecordRequest(BaseModel):
     discord_webhook_url: str | None = None
     custom_headline: str | None = None
     enable_end_screen: bool = True
+    remove_music: bool | None = None
 class PreviewRequest(BaseModel): stream_url: str
 class ProcessRequest(BaseModel):
     layout_mode: str | None = None
@@ -113,8 +114,10 @@ class ProcessRequest(BaseModel):
     max_clips: int = 3
     custom_headline: str | None = None
     embed_intro_cover: bool | None = None
+    remove_music: bool | None = None
 class BrandingRequest(BaseModel):
     enable_end_screen: bool = True
+    remove_music: bool = False
     use_default_thumbnail: bool = True
     outro_duration_seconds: int = 15
     archive_channel_name: str | None = None
@@ -192,7 +195,7 @@ def preview_stream(platform: str, normalized_url: str) -> dict:
 def stream_data(stream: Stream, clips: list[Clip] | None = None) -> dict:
     result = {"id": str(stream.id), "source_url": stream.source_url, "platform": stream.platform, "status": stream.status,
               "master_url": presigned_download_url(stream.master_key) if stream.master_key else None, "started_at": stream.started_at,
-              "ended_at": stream.ended_at, "error": stream.error_message, "stop_requested": stream.stop_requested, "layout_mode": stream.layout_mode, "thumbnail_url": presigned_download_url(stream.thumbnail_key) if stream.thumbnail_key else None, "target_clip_duration": stream.target_clip_duration}
+              "ended_at": stream.ended_at, "error": stream.error_message, "stop_requested": stream.stop_requested, "layout_mode": stream.layout_mode, "remove_music": stream.remove_music, "thumbnail_url": presigned_download_url(stream.thumbnail_key) if stream.thumbnail_key else None, "target_clip_duration": stream.target_clip_duration}
     if clips is not None:
         result["clips"] = [{"id": str(c.id), "start_seconds": c.start_seconds, "end_seconds": c.end_seconds, "score": c.score,
                             "transcript": c.transcript, "url": presigned_download_url(c.vertical_key) if c.vertical_key else None, "thumbnail_url": presigned_download_url(c.thumbnail_key) if c.thumbnail_key else None} for c in clips]
@@ -209,6 +212,8 @@ def _ensure_preset_schema(db):
         db.execute(text("ALTER TABLE archive_branding ADD COLUMN IF NOT EXISTS default_short_thumbnail_key TEXT"))
         db.execute(text("ALTER TABLE archive_branding ADD COLUMN IF NOT EXISTS use_default_thumbnail BOOLEAN NOT NULL DEFAULT TRUE"))
         db.execute(text("ALTER TABLE streams ADD COLUMN IF NOT EXISTS short_thumbnail_key TEXT"))
+        db.execute(text("ALTER TABLE archive_branding ADD COLUMN IF NOT EXISTS remove_music BOOLEAN NOT NULL DEFAULT FALSE"))
+        db.execute(text("ALTER TABLE streams ADD COLUMN IF NOT EXISTS remove_music BOOLEAN NOT NULL DEFAULT FALSE"))
         db.commit()
 def _branding(db):
     _ensure_preset_schema(db)
@@ -218,7 +223,7 @@ def _branding(db):
 @app.get("/branding")
 def get_branding():
     with SessionLocal() as db:
-        item = _branding(db); return {"enable_end_screen":item.enable_end_screen,"use_default_thumbnail":item.use_default_thumbnail,"outro_duration_seconds":item.outro_duration_seconds,"archive_channel_name":item.archive_channel_name,"archive_tagline":item.archive_tagline,"archive_logo_key":item.archive_logo_key,"archive_logo_url":presigned_download_url(item.archive_logo_key) if item.archive_logo_key else None,"default_thumbnail_key":item.default_thumbnail_key,"default_thumbnail_url":presigned_download_url(item.default_thumbnail_key) if item.default_thumbnail_key else None,"default_short_thumbnail_key":item.default_short_thumbnail_key,"default_short_thumbnail_url":presigned_download_url(item.default_short_thumbnail_key) if item.default_short_thumbnail_key else None,"default_left_vod_id":item.default_left_vod_id,"default_right_vod_id":item.default_right_vod_id}
+        item = _branding(db); return {"enable_end_screen":item.enable_end_screen,"remove_music":item.remove_music,"use_default_thumbnail":item.use_default_thumbnail,"outro_duration_seconds":item.outro_duration_seconds,"archive_channel_name":item.archive_channel_name,"archive_tagline":item.archive_tagline,"archive_logo_key":item.archive_logo_key,"archive_logo_url":presigned_download_url(item.archive_logo_key) if item.archive_logo_key else None,"default_thumbnail_key":item.default_thumbnail_key,"default_thumbnail_url":presigned_download_url(item.default_thumbnail_key) if item.default_thumbnail_key else None,"default_short_thumbnail_key":item.default_short_thumbnail_key,"default_short_thumbnail_url":presigned_download_url(item.default_short_thumbnail_key) if item.default_short_thumbnail_key else None,"default_left_vod_id":item.default_left_vod_id,"default_right_vod_id":item.default_right_vod_id}
 @app.put("/branding")
 def put_branding(payload: BrandingRequest):
     if not 10 <= payload.outro_duration_seconds <= 20: raise HTTPException(422,"outro_duration_seconds must be between 10 and 20")
@@ -352,7 +357,7 @@ def record(payload: RecordRequest, request: Request):
     try:
         with SessionLocal() as db:
             branding = _branding(db)
-            stream = Stream(channel_id=None, source_url=normalized, platform=platform, status=StreamStatus.queued, layout_mode=layout_mode, discord_webhook_url=webhook, custom_headline=(payload.custom_headline or "").strip()[:160] or None, enable_end_screen=branding.enable_end_screen, archive_channel_name=branding.archive_channel_name, archive_tagline=branding.archive_tagline, outro_duration_seconds=branding.outro_duration_seconds, left_vod_id=branding.default_left_vod_id, right_vod_id=branding.default_right_vod_id)
+            stream = Stream(channel_id=None, source_url=normalized, platform=platform, status=StreamStatus.queued, layout_mode=layout_mode, discord_webhook_url=webhook, custom_headline=(payload.custom_headline or "").strip()[:160] or None, enable_end_screen=branding.enable_end_screen, remove_music=branding.remove_music if payload.remove_music is None else payload.remove_music, archive_channel_name=branding.archive_channel_name, archive_tagline=branding.archive_tagline, outro_duration_seconds=branding.outro_duration_seconds, left_vod_id=branding.default_left_vod_id, right_vod_id=branding.default_right_vod_id)
             db.add(stream); db.flush()
             if branding.default_thumbnail_key and branding.use_default_thumbnail:
                 suffix = Path(branding.default_thumbnail_key).suffix or ".png"
@@ -426,6 +431,7 @@ def process_stream(stream_id: UUID, payload: ProcessRequest = ProcessRequest()):
         if not 1 <= payload.max_clips <= 10: raise HTTPException(422, "max_clips must be between 1 and 10")
         if payload.custom_headline is not None: stream.custom_headline = payload.custom_headline.strip()[:160] or None
         if payload.embed_intro_cover is not None: stream.embed_intro_cover = payload.embed_intro_cover
+        if payload.remove_music is not None: stream.remove_music = payload.remove_music
         if payload.embed_intro_cover:
             branding = _branding(db)
             if branding.default_short_thumbnail_key:
@@ -442,6 +448,11 @@ def process_stream(stream_id: UUID, payload: ProcessRequest = ProcessRequest()):
 @app.post("/recordings/{stream_id}/clips/generate", status_code=202)
 def generate_custom_clips(stream_id: UUID, payload: ProcessRequest):
     return process_stream(stream_id, payload)
+
+# Public API alias retained for clients that use the Phase 8 naming.
+@app.post("/streams/start", status_code=202)
+def start_stream(payload: RecordRequest, request: Request):
+    return record(payload, request)
 
 @app.delete("/recordings/{stream_id}", status_code=204)
 def delete_recording(stream_id: UUID):

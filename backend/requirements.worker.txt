@@ -7,3 +7,4 @@ opencv-python-headless==4.10.0.84
 Pillow==11.0.0
 arabic-reshaper==3.0.0
 python-bidi==0.6.3
+demucs==4.0.1

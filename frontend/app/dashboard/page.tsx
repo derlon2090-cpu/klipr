@@ -24,6 +24,7 @@ import { useLanguage } from "@/components/language";
 
 const emptyBranding: Branding = {
   enable_end_screen: true,
+  remove_music: false,
   use_default_thumbnail: true,
   outro_duration_seconds: 15,
   archive_channel_name: "",
@@ -122,6 +123,7 @@ export default function Dashboard() {
     [message, setMessage] = useState(""),
     [now, setNow] = useState(Date.now());
   const [options, setOptions] = useState(false);
+  const [removeMusic, setRemoveMusic] = useState(false);
   const [search, setSearch] = useState(""),
     [filter, setFilter] = useState<"all" | "twitch" | "kick">("all"),
     [deleting, setDeleting] = useState<string | null>(null);
@@ -157,7 +159,10 @@ export default function Dashboard() {
     load();
     api
       .branding()
-      .then(setBranding)
+      .then((value) => {
+        setBranding(value);
+        setRemoveMusic(value.remove_music);
+      })
       .catch(() => undefined);
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
@@ -222,7 +227,7 @@ export default function Dashboard() {
     setBusy(true);
     setMessage("");
     try {
-      await api.record(url);
+      await api.record(url, { remove_music: removeMusic });
       setUrl("");
       setPreview(null);
       await load();
@@ -268,6 +273,7 @@ export default function Dashboard() {
         custom_headline: clipHeadline,
         embed_intro_cover:
           embedCover && Boolean(branding.default_short_thumbnail_key),
+        remove_music: removeMusic,
       });
       await load();
       setDetailed(await api.stream(selected));
@@ -602,6 +608,10 @@ export default function Dashboard() {
         </button>
         {options && (
           <div className="mt-4 grid gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:grid-cols-2">
+            <label className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 lg:col-span-2">
+              <input type="checkbox" checked={removeMusic} onChange={(e) => setRemoveMusic(e.target.checked)} className="mt-1 size-5 accent-emerald-500" />
+              <span><span className="block font-black">{ar ? "إزالة الأغاني وموسيقى الدونيشن تلقائياً (DMCA Safe)" : "Remove donation songs & music automatically (DMCA Safe)"}</span><span className="mt-1 block text-xs leading-5 text-slate-600">{ar ? "تُعزل الموسيقى الخلفية وأغاني الدونيشن مع الحفاظ على صوت الستريمر واضحًا." : "Background music and donation songs are stripped while the streamer voice stays clear."}</span></span>
+            </label>
             <article className="flex flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="flex items-start gap-4">
                 <div className="h-24 w-40 shrink-0 overflow-hidden rounded-xl bg-slate-100">
@@ -860,11 +870,7 @@ export default function Dashboard() {
               </div>
               <div className="p-5">
                 <div className="flex items-center justify-between">
-                  <span
-                    className={`rounded-full px-2 py-1 text-xs font-black ${platformClass(stream.platform)}`}
-                  >
-                    {stream.platform.toUpperCase()}
-                  </span>
+                  <div className="flex items-center gap-2"><span className={`rounded-full px-2 py-1 text-xs font-black ${platformClass(stream.platform)}`}>{stream.platform.toUpperCase()}</span>{stream.remove_music && <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-black text-emerald-700">DMCA Safe • {ar ? "بدون موسيقى" : "No music"}</span>}</div>
                   <StatusBadge status={stream.status} />
                 </div>
                 <h3 className="mt-3 truncate font-black">{handle(stream)}</h3>
@@ -993,6 +999,10 @@ export default function Dashboard() {
               className={inputClass}
             />
           </div>
+          <label className="mt-4 flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+            <input type="checkbox" checked={removeMusic} onChange={(e) => setRemoveMusic(e.target.checked)} className="mt-1 size-5 accent-emerald-500" />
+            <span><span className="block text-sm font-black">{ar ? "إزالة الأغاني وموسيقى الدونيشن تلقائياً (DMCA Safe)" : "DMCA-safe vocal-only Shorts"}</span><span className="mt-1 block text-xs leading-5 text-slate-600">{ar ? "تُزال الموسيقى من الشورت مع إبقاء صوت الستريمر واضحًا." : "Strip music from each Short while retaining the streamer voice."}</span></span>
+          </label>
           <label className="mt-5 block text-sm font-black">
             {ar ? "عدد المقاطع (1–10)" : "Clip count (1–10)"}
             <input
@@ -1115,9 +1125,7 @@ export default function Dashboard() {
                     />
                   )}
                   <div className="mt-3 flex items-center justify-between">
-                    <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-black text-emerald-700">
-                      AR / EN {ar ? "ترجمة" : "CAPTIONS"}
-                    </span>
+                    <div className="flex items-center gap-2"><span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-black text-emerald-700">AR / EN {ar ? "ترجمة" : "CAPTIONS"}</span>{detailed?.remove_music && <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-black text-emerald-700">DMCA Safe • {ar ? "بدون موسيقى" : "No music"}</span>}</div>
                     <span className="text-xs font-bold text-slate-500">
                       {Math.round(clip.end_seconds - clip.start_seconds)}s
                     </span>
@@ -1330,6 +1338,10 @@ export default function Dashboard() {
               }
               className="size-5 accent-emerald-500"
             />
+          </label>
+          <label className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+            <input type="checkbox" checked={branding.remove_music} onChange={(e) => setBranding({ ...branding, remove_music: e.target.checked })} className="mt-1 size-5 accent-emerald-500" />
+            <span><span className="block font-black">{ar ? "إزالة الأغاني وموسيقى الدونيشن تلقائياً (DMCA Safe)" : "Remove donation songs & music automatically (DMCA Safe)"}</span><span className="mt-1 block text-xs font-normal leading-5 text-slate-600">{ar ? "إعداد افتراضي للتسجيلات الجديدة: تُزال الموسيقى مع الحفاظ على صوت الستريمر." : "Default for new recordings: music is removed while the streamer voice remains clear."}</span></span>
           </label>
           <label className="block text-sm font-black">
             {ar

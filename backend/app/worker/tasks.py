@@ -87,7 +87,7 @@ def record_stream(stream_id: str, normalized_url: str | None = None, owner_key: 
 
 @shared_task
 def finalize_stream(stream_id: str, normalized_url: str | None = None, owner_key: str | None = None) -> None:
-    sid, job_dir = UUID(stream_id), WORK_ROOT / stream_id
+    sid, job_dir, settings = UUID(stream_id), WORK_ROOT / stream_id, get_settings()
     try:
         chunks = sorted((job_dir / "chunks").glob("*.ts"))
         if not chunks:
@@ -95,6 +95,14 @@ def finalize_stream(stream_id: str, normalized_url: str | None = None, owner_key
         manifest, master = job_dir / "concat.txt", job_dir / "master.mp4"
         manifest.write_text("".join(f"file '{p.as_posix()}'\n" for p in chunks), encoding="utf-8")
         subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(manifest), "-c", "copy", "-movflags", "+faststart", str(master)], check=True, shell=False)
+        with SessionLocal() as db:
+            stream = db.get(Stream, sid)
+            remove_music = bool(stream and stream.remove_music)
+        if remove_music:
+            from app.worker.audio_clean import clean_vocal_audio
+            cleaned_master = job_dir / "master-vocals.mp4"
+            if clean_vocal_audio(master, cleaned_master, job_dir / "audio-clean", settings.audio_clean_timeout_seconds):
+                master = cleaned_master
         with SessionLocal() as db:
             stream = db.get(Stream, sid)
             enabled = bool(stream and stream.enable_end_screen)

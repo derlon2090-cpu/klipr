@@ -140,7 +140,7 @@ def process_stream_highlights(stream_id: str, max_clips: int = 3) -> None:
             raise ValueError("A completed master VOD is required")
         master_key = stream.master_key
         layout_mode, webhook_url = stream.layout_mode, stream.discord_webhook_url
-        target_seconds, headline, embed_intro, platform, short_thumbnail_key = stream.target_clip_duration, stream.custom_headline or "", stream.embed_intro_cover, stream.platform, stream.short_thumbnail_key
+        target_seconds, headline, embed_intro, platform, short_thumbnail_key, remove_music = stream.target_clip_duration, stream.custom_headline or "", stream.embed_intro_cover, stream.platform, stream.short_thumbnail_key, stream.remove_music
     job_dir = WORK_ROOT / stream_id / "highlight-processing"
     vod, wav = job_dir / "master.mp4", job_dir / "audio.wav"
     _set_status(sid, StreamStatus.processing)
@@ -165,6 +165,11 @@ def process_stream_highlights(stream_id: str, max_clips: int = 3) -> None:
                     add_intro_thumbnail(raw_output, intro_thumbnail, output)
                 else:
                     render_vertical(vod, ass, window, output, layout_mode)
+                if remove_music:
+                    from .audio_clean import clean_vocal_audio
+                    cleaned_output = job_dir / f"highlight-{index}-vocals.mp4"
+                    if clean_vocal_audio(output, cleaned_output, job_dir / f"audio-clean-{index}", get_settings().audio_clean_timeout_seconds):
+                        output = cleaned_output
                 key = f"clips/{stream_id}/highlight-{index}.mp4"
                 upload_file(output, key, "video/mp4")
                 from .thumbnails import make_thumbnail

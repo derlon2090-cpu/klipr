@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     whisper_model: str = "small"
     whisper_device: str = "cpu"
     whisper_compute_type: str = "int8"
+    audio_clean_timeout_seconds: int = 900
     r2_presigned_url_ttl_seconds: int = 3600
     klipr_access_password: str = ""
     klipr_session_secret: str = ""

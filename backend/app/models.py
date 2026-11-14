@@ -37,6 +37,7 @@ class ArchiveBranding(Base):
     __tablename__ = "archive_branding"
     id: Mapped[int] = mapped_column(primary_key=True, default=1)
     enable_end_screen: Mapped[bool] = mapped_column(Boolean, default=True)
+    remove_music: Mapped[bool] = mapped_column(Boolean, default=False)
     outro_duration_seconds: Mapped[int] = mapped_column(default=15)
     archive_channel_name: Mapped[str | None] = mapped_column(String(120))
     archive_tagline: Mapped[str | None] = mapped_column(String(240))
@@ -66,6 +67,7 @@ class Stream(Base):
     target_clip_duration: Mapped[int] = mapped_column(default=45)
     embed_intro_cover: Mapped[bool] = mapped_column(Boolean, default=True)
     enable_end_screen: Mapped[bool] = mapped_column(Boolean, default=True)
+    remove_music: Mapped[bool] = mapped_column(Boolean, default=False)
     archive_logo_key: Mapped[str | None] = mapped_column(Text)
     archive_tagline: Mapped[str | None] = mapped_column(String(240))
     archive_channel_name: Mapped[str | None] = mapped_column(String(120))
