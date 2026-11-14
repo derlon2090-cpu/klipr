@@ -49,6 +49,14 @@ class ArchiveBranding(Base):
     default_right_vod_id: Mapped[UUID | None] = mapped_column(nullable=True)
 
 
+class SavedThumbnail(Base):
+    __tablename__ = "saved_thumbnails"
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    kind: Mapped[str] = mapped_column(String(16), index=True)
+    storage_key: Mapped[str] = mapped_column(Text, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Stream(Base):
     __tablename__ = "streams"
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)

@@ -60,6 +60,13 @@ export type Branding = {
   default_left_vod_id: string | null;
   default_right_vod_id: string | null;
 };
+export type SavedThumbnail = {
+  id: string;
+  kind: "vod" | "short";
+  key: string;
+  url: string;
+  selected: boolean;
+};
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API}${path}`, {
@@ -145,6 +152,9 @@ export const api = {
   remove: (id: string) =>
     request<void>(`/recordings/${id}`, { method: "DELETE" }),
   branding: () => request<Branding>("/branding"),
+  savedThumbnails: () => request<SavedThumbnail[]>("/branding/thumbnails"),
+  selectThumbnail: (id: string) => request<SavedThumbnail>(`/branding/thumbnails/${id}/select`, { method: "POST" }),
+  deleteSavedThumbnail: (id: string) => request<void>(`/branding/thumbnails/${id}`, { method: "DELETE" }),
   saveBranding: (
     branding: Omit<
       Branding,

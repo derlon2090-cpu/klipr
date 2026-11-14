@@ -17,7 +17,7 @@ import {
   WandSparkles,
   X,
 } from "lucide-react";
-import { api, ArchiveShort, Branding, Stream, StreamPreview } from "@/lib/api";
+import { api, ArchiveShort, Branding, SavedThumbnail, Stream, StreamPreview } from "@/lib/api";
 import { DashboardSection, Shell } from "@/components/shell";
 import { StatusBadge } from "@/components/status";
 import { useLanguage } from "@/components/language";
@@ -137,6 +137,7 @@ export default function Dashboard() {
   const [thumbPlatform, setThumbPlatform] = useState<"twitch" | "kick">("kick"),
     [thumbFormat, setThumbFormat] = useState<"vod" | "short">("vod");
   const [branding, setBranding] = useState<Branding>(emptyBranding),
+    [savedThumbnails, setSavedThumbnails] = useState<SavedThumbnail[]>([]),
     [logoPreview, setLogoPreview] = useState<string | null>(null),
     [savingBrand, setSavingBrand] = useState(false);
 
@@ -161,10 +162,10 @@ export default function Dashboard() {
     ) as DashboardSection | null;
     if (query && validSections.includes(query)) setSection(query);
     load();
-    api
-      .branding()
-      .then((value) => {
+    Promise.all([api.branding(), api.savedThumbnails()])
+      .then(([value, thumbnails]) => {
         setBranding(value);
+        setSavedThumbnails(thumbnails);
         setRemoveMusic(value.remove_music);
       })
       .catch(() => undefined);
@@ -459,6 +460,7 @@ export default function Dashboard() {
               use_default_thumbnail: true,
             },
       );
+      setSavedThumbnails(await api.savedThumbnails());
       setMessage(
         ar
           ? thumbFormat === "short"
@@ -491,12 +493,34 @@ export default function Dashboard() {
               use_default_thumbnail: false,
             },
       );
+      setSavedThumbnails(await api.savedThumbnails());
       setMessage(
         ar ? "تمت إزالة الثامبنيل المحفوظة." : "Saved thumbnail removed.",
       );
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Request failed");
     }
+  };
+  const chooseSavedThumbnail = async (thumbnail: SavedThumbnail) => {
+    try {
+      const selectedThumbnail = await api.selectThumbnail(thumbnail.id);
+      setSavedThumbnails((current) => current.map((item) => ({ ...item, selected: item.kind === thumbnail.kind ? item.id === thumbnail.id : item.selected })));
+      setBranding((current) => thumbnail.kind === "short" ? { ...current, default_short_thumbnail_key: selectedThumbnail.key, default_short_thumbnail_url: selectedThumbnail.url } : { ...current, default_thumbnail_key: selectedThumbnail.key, default_thumbnail_url: selectedThumbnail.url, use_default_thumbnail: true });
+      if (thumbnail.kind === "short") setEmbedCover(true);
+      setMessage(ar ? "تم اختيار الثامبنيل وتفعيلها تلقائيًا." : "Thumbnail selected and activated.");
+    } catch (e) { setMessage(e instanceof Error ? e.message : "Request failed"); }
+  };
+  const removeSavedThumbnail = async (thumbnail: SavedThumbnail) => {
+    try {
+      await api.deleteSavedThumbnail(thumbnail.id);
+      setSavedThumbnails((current) => current.filter((item) => item.id !== thumbnail.id));
+      if (thumbnail.selected) setBranding((current) => thumbnail.kind === "short" ? { ...current, default_short_thumbnail_key: null, default_short_thumbnail_url: null } : { ...current, default_thumbnail_key: null, default_thumbnail_url: null, use_default_thumbnail: false });
+    } catch (e) { setMessage(e instanceof Error ? e.message : "Request failed"); }
+  };
+  const thumbnailChoices = (kind: "vod" | "short", compact = false) => {
+    const items = savedThumbnails.filter((item) => item.kind === kind);
+    if (!items.length) return <p className="mt-3 text-xs text-slate-400">{ar ? "لا توجد ثامبنيلات محفوظة بهذا المقاس بعد." : "No saved thumbnails in this format yet."}</p>;
+    return <div className={`mt-3 grid gap-2 ${compact ? (kind === "short" ? "grid-cols-4" : "grid-cols-3") : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4"}`}>{items.map((item) => <button type="button" key={item.id} onClick={() => chooseSavedThumbnail(item)} className={`group relative overflow-hidden rounded-xl border-2 bg-slate-100 ${item.selected ? "border-emerald-500 ring-2 ring-emerald-100" : "border-transparent hover:border-slate-300"}`}><img src={item.url} alt="Saved thumbnail" className={`${kind === "short" ? "aspect-[9/16]" : "aspect-video"} w-full object-cover`} />{item.selected && <span className="absolute end-1 top-1 grid size-5 place-items-center rounded-full bg-emerald-500 text-white"><Check size={12} /></span>}</button>)}</div>;
   };
   const uploadRecordingThumbnail = async (streamId: string, file?: File) => {
     if (!file) return;
@@ -706,6 +730,7 @@ export default function Dashboard() {
                   </button>
                 )}
               </div>
+              <div className="mt-4 border-t border-slate-100 pt-3"><p className="text-xs font-black text-slate-600">{ar ? "اختر ثامبنيل محفوظة للبث" : "Choose a saved VOD thumbnail"}</p>{thumbnailChoices("vod", true)}</div>
             </article>
             <article className="flex flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="flex items-start gap-4">
@@ -1115,6 +1140,7 @@ export default function Dashboard() {
                 </button>
               </div>
             </div>
+            <div className="mt-4 border-t border-emerald-200 pt-3"><p className="text-xs font-black text-emerald-800">{ar ? "اختر ثامبنيل طولية محفوظة" : "Choose a saved vertical thumbnail"}</p>{thumbnailChoices("short", true)}</div>
           </div>
           <label className="mt-5 block text-sm font-black">
             {ar ? "عنوان الغلاف" : "Cover headline"}
@@ -1349,9 +1375,16 @@ export default function Dashboard() {
           </div>
         </section>
       </div>
+      <SavedThumbnailLibrary />
     </>
   );
 
+  function SavedThumbnailLibrary() {
+    return <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-center justify-between"><div><h2 className="text-lg font-black">{ar ? "مكتبة الثامبنيلات المحفوظة" : "Saved thumbnail library"}</h2><p className="mt-1 text-xs text-slate-500">{ar ? "اختر أي تصميم ليصبح الغلاف الافتراضي، أو احذف التصاميم التي لم تعد تحتاجها." : "Select a design as the default, or remove designs you no longer need."}</p></div><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-500">{savedThumbnails.filter((item) => item.kind === thumbFormat).length}</span></div>
+      {savedThumbnails.some((item) => item.kind === thumbFormat) ? <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">{savedThumbnails.filter((item) => item.kind === thumbFormat).map((item) => <article key={item.id} className={`overflow-hidden rounded-xl border-2 p-2 ${item.selected ? "border-emerald-500 bg-emerald-50" : "border-slate-200"}`}><button type="button" onClick={() => chooseSavedThumbnail(item)} className="relative block w-full overflow-hidden rounded-lg bg-slate-100"><img src={item.url} alt="Saved thumbnail" className={`${item.kind === "short" ? "aspect-[9/16]" : "aspect-video"} w-full object-cover`} />{item.selected && <span className="absolute end-2 top-2 rounded-full bg-emerald-500 px-2 py-1 text-[10px] font-black text-white">{ar ? "مختارة" : "Selected"}</span>}</button><div className="mt-2 flex items-center justify-between"><button type="button" onClick={() => chooseSavedThumbnail(item)} className="text-xs font-black text-emerald-700">{ar ? "اختيار" : "Select"}</button><button type="button" onClick={() => removeSavedThumbnail(item)} className="text-xs font-black text-rose-600">{ar ? "حذف" : "Delete"}</button></div></article>)}</div> : <Empty text={ar ? "صمّم واحفظ أول ثامبنيل لتظهر هنا." : "Create and save your first thumbnail to see it here."} />}
+    </section>;
+  }
   const logo = logoPreview || branding.archive_logo_url;
   const brandingView = (
     <>

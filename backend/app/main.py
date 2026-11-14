@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, text
 from app.db import SessionLocal
 from app.config import get_settings
-from app.models import ArchiveBranding, Clip, Stream, StreamStatus
+from app.models import ArchiveBranding, Clip, SavedThumbnail, Stream, StreamStatus
 from app.storage import copy_file, delete_files, presigned_download_url, upload_file
 from app.worker.tasks import WORK_ROOT, active_key, record_stream, redis_client, stop_key, task_key
 
@@ -214,6 +214,8 @@ def _ensure_preset_schema(db):
         db.execute(text("ALTER TABLE streams ADD COLUMN IF NOT EXISTS short_thumbnail_key TEXT"))
         db.execute(text("ALTER TABLE archive_branding ADD COLUMN IF NOT EXISTS remove_music BOOLEAN NOT NULL DEFAULT FALSE"))
         db.execute(text("ALTER TABLE streams ADD COLUMN IF NOT EXISTS remove_music BOOLEAN NOT NULL DEFAULT FALSE"))
+        db.execute(text("CREATE TABLE IF NOT EXISTS saved_thumbnails (id UUID PRIMARY KEY, kind VARCHAR(16) NOT NULL, storage_key TEXT NOT NULL UNIQUE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), CONSTRAINT saved_thumbnails_kind_check CHECK (kind IN ('vod', 'short')))"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS ix_saved_thumbnails_kind ON saved_thumbnails(kind)"))
         db.commit()
 def _branding(db):
     _ensure_preset_schema(db)
@@ -273,10 +275,43 @@ async def upload_branding_thumbnail(file: UploadFile = File(...), kind: str = Fo
             field = "default_short_thumbnail_key" if kind == "short" else "default_thumbnail_key"
             old=getattr(item, field); setattr(item, field, key)
             if kind == "vod": item.use_default_thumbnail=True
+            db.add(SavedThumbnail(kind=kind, storage_key=key))
             db.commit()
-        if old: delete_files([old])
     finally: path.unlink(missing_ok=True)
     return {"kind":kind,"key":key,"url":presigned_download_url(key),"use_default_thumbnail":item.use_default_thumbnail}
+
+@app.get("/branding/thumbnails")
+def list_saved_thumbnails():
+    with SessionLocal() as db:
+        item = _branding(db)
+        # Preserve presets created before the gallery feature was introduced.
+        for kind, key in (("vod", item.default_thumbnail_key), ("short", item.default_short_thumbnail_key)):
+            if key and not db.query(SavedThumbnail).filter(SavedThumbnail.storage_key == key).first():
+                db.add(SavedThumbnail(kind=kind, storage_key=key))
+        db.commit()
+        rows = db.query(SavedThumbnail).order_by(SavedThumbnail.created_at.desc()).all()
+        return [{"id":str(row.id),"kind":row.kind,"key":row.storage_key,"url":presigned_download_url(row.storage_key),"selected":row.storage_key == (item.default_short_thumbnail_key if row.kind == "short" else item.default_thumbnail_key)} for row in rows]
+
+@app.post("/branding/thumbnails/{thumbnail_id}/select")
+def select_saved_thumbnail(thumbnail_id: UUID):
+    with SessionLocal() as db:
+        item, thumbnail = _branding(db), db.get(SavedThumbnail, thumbnail_id)
+        if thumbnail is None: raise HTTPException(404, "Saved thumbnail not found")
+        if thumbnail.kind == "short": item.default_short_thumbnail_key = thumbnail.storage_key
+        else: item.default_thumbnail_key = thumbnail.storage_key; item.use_default_thumbnail = True
+        db.commit()
+        return {"id":str(thumbnail.id),"kind":thumbnail.kind,"key":thumbnail.storage_key,"url":presigned_download_url(thumbnail.storage_key),"selected":True}
+
+@app.delete("/branding/thumbnails/{thumbnail_id}", status_code=204)
+def delete_saved_thumbnail(thumbnail_id: UUID):
+    with SessionLocal() as db:
+        item, thumbnail = _branding(db), db.get(SavedThumbnail, thumbnail_id)
+        if thumbnail is None: raise HTTPException(404, "Saved thumbnail not found")
+        key = thumbnail.storage_key
+        if item.default_thumbnail_key == key: item.default_thumbnail_key = None; item.use_default_thumbnail = False
+        if item.default_short_thumbnail_key == key: item.default_short_thumbnail_key = None
+        db.delete(thumbnail); db.commit()
+    delete_files([key])
 
 @app.delete("/branding/thumbnail", status_code=204)
 def delete_branding_thumbnail(kind: str = "vod"):
@@ -284,6 +319,7 @@ def delete_branding_thumbnail(kind: str = "vod"):
     with SessionLocal() as db:
         item = _branding(db); field = "default_short_thumbnail_key" if kind == "short" else "default_thumbnail_key"; old = getattr(item, field); setattr(item, field, None)
         if kind == "vod": item.use_default_thumbnail = False
+        if old: db.query(SavedThumbnail).filter(SavedThumbnail.storage_key == old).delete()
         db.commit()
     if old: delete_files([old])
 
