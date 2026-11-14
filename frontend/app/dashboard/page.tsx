@@ -1257,11 +1257,7 @@ export default function Dashboard() {
       />
       <div className="grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
         <aside className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <label className="text-sm font-black">
-            {ar ? "مصدر الغلاف" : "Thumbnail source"}
-            {picker}
-          </label>
-          <div className="mt-5">
+          <div>
             <p className="text-sm font-black">
               {ar ? "مقاس الصورة" : "Image size"}
             </p>
