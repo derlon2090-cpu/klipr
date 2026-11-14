@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     klipr_secure_cookies: bool = False
     klipr_cors_origins: str = "https://klipr.cloud,https://klipr-zeta.vercel.app"
     klipr_studio_url: str = "https://klipr.cloud"
+    twitch_client_id: str = ""
+    twitch_client_secret: str = ""
+    twitch_eventsub_secret: str = ""
+    twitch_eventsub_callback_url: str = ""
+    watcher_proxy_url: str | None = None
 
 
 @lru_cache

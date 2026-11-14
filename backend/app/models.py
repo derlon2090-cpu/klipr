@@ -69,6 +69,8 @@ class WatchlistSubscription(Base):
     delay_seconds: Mapped[int] = mapped_column(default=30)
     is_currently_live: Mapped[bool] = mapped_column(Boolean, default=False)
     last_stream_id: Mapped[str | None] = mapped_column(String(255))
+    twitch_user_id: Mapped[str | None] = mapped_column(String(64))
+    eventsub_subscription_id: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

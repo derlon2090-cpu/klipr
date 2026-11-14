@@ -8,7 +8,7 @@ celery_app.conf.imports = ("app.worker.tasks", "app.worker.highlights", "app.wor
 celery_app.conf.beat_schedule = {
     "check-creator-watchlist-every-minute": {
         "task": "app.worker.watcher.check_watchlist_streams",
-        "schedule": 60.0,
+        "schedule": 45.0,
     }
 }
 celery_app.autodiscover_tasks(["app.worker"])

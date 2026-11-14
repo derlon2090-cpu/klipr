@@ -93,7 +93,7 @@ def _reserve_recording_slot(owner_key: str, stream_id: str) -> bool:
 
 @app.middleware("http")
 async def require_klipr_session(request: Request, call_next):
-    public_paths = {"/health", "/auth/password", "/auth/email", "/auth/me", "/docs", "/openapi.json"}
+    public_paths = {"/health", "/auth/password", "/auth/email", "/auth/me", "/webhooks/twitch/eventsub", "/docs", "/openapi.json"}
     path = request.url.path.removeprefix("/api") or "/"
     if request.method == "OPTIONS" or path in public_paths or _read_token(request.cookies.get("klipr_session"), "session"):
         return await call_next(request)
@@ -230,6 +230,8 @@ def _ensure_watchlist_schema(db):
     if db.bind.dialect.name == "postgresql":
         db.execute(text("CREATE TABLE IF NOT EXISTS watchlist_subscriptions (id UUID PRIMARY KEY, platform VARCHAR(16) NOT NULL, channel_slug VARCHAR(100) NOT NULL, channel_url TEXT NOT NULL UNIQUE, display_name VARCHAR(120) NOT NULL, avatar_url TEXT, auto_record BOOLEAN NOT NULL DEFAULT TRUE, delay_seconds INTEGER NOT NULL DEFAULT 30, is_currently_live BOOLEAN NOT NULL DEFAULT FALSE, last_stream_id VARCHAR(255), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), CONSTRAINT watchlist_platform_check CHECK (platform IN ('twitch','kick')), CONSTRAINT watchlist_delay_check CHECK (delay_seconds BETWEEN 10 AND 300))"))
         db.execute(text("CREATE TABLE IF NOT EXISTS notifications (id UUID PRIMARY KEY, subscription_id UUID REFERENCES watchlist_subscriptions(id) ON DELETE SET NULL, title VARCHAR(200) NOT NULL, message TEXT NOT NULL, channel_url TEXT NOT NULL, status VARCHAR(32) NOT NULL, is_read BOOLEAN NOT NULL DEFAULT FALSE, scheduled_for TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), CONSTRAINT notification_status_check CHECK (status IN ('pending_auto_record','auto_started','cancelled','manual_taken_over')))"))
+        db.execute(text("ALTER TABLE watchlist_subscriptions ADD COLUMN IF NOT EXISTS twitch_user_id VARCHAR(64)"))
+        db.execute(text("ALTER TABLE watchlist_subscriptions ADD COLUMN IF NOT EXISTS eventsub_subscription_id VARCHAR(255)"))
         db.execute(text("CREATE INDEX IF NOT EXISTS ix_notifications_created_at ON notifications(created_at DESC)"))
         db.commit()
 def _branding(db):
@@ -506,7 +508,16 @@ def add_watchlist(payload: WatchlistRequest):
     with SessionLocal() as db:
         _ensure_watchlist_schema(db)
         if db.query(WatchlistSubscription).filter(WatchlistSubscription.channel_url == normalized).first(): raise HTTPException(409, "Creator is already subscribed")
-        item = WatchlistSubscription(platform=platform, channel_slug=slug, channel_url=normalized, display_name=metadata.get("streamer_name") or slug, avatar_url=metadata.get("thumbnail_url"), auto_record=payload.auto_record, delay_seconds=payload.delay_seconds, is_currently_live=False, last_stream_id=None)
+        twitch_user_id = eventsub_id = None
+        if platform == "twitch":
+            try:
+                from app.twitch_eventsub import register_stream_online
+                registration = register_stream_online(slug)
+                if registration: twitch_user_id, eventsub_id = registration
+            except Exception:
+                # Keep a polling fallback if credentials or Twitch are temporarily unavailable.
+                pass
+        item = WatchlistSubscription(platform=platform, channel_slug=slug, channel_url=normalized, display_name=metadata.get("streamer_name") or slug, avatar_url=metadata.get("thumbnail_url"), auto_record=payload.auto_record, delay_seconds=payload.delay_seconds, is_currently_live=False, last_stream_id=None, twitch_user_id=twitch_user_id, eventsub_subscription_id=eventsub_id)
         db.add(item); db.commit(); db.refresh(item)
         return _watchlist_data(item)
 
@@ -525,7 +536,44 @@ def delete_watchlist(subscription_id: UUID):
     with SessionLocal() as db:
         _ensure_watchlist_schema(db); item = db.get(WatchlistSubscription, subscription_id)
         if item is None: raise HTTPException(404, "Subscription not found")
-        db.delete(item); db.commit()
+        eventsub_id = item.eventsub_subscription_id; db.delete(item); db.commit()
+    if eventsub_id:
+        try:
+            from app.twitch_eventsub import delete_eventsub_subscription
+            delete_eventsub_subscription(eventsub_id)
+        except Exception:
+            pass
+
+@app.post("/webhooks/twitch/eventsub")
+async def twitch_eventsub_webhook(request: Request):
+    raw = await request.body()
+    message_id = request.headers.get("twitch-eventsub-message-id", "")
+    timestamp = request.headers.get("twitch-eventsub-message-timestamp", "")
+    signature = request.headers.get("twitch-eventsub-message-signature", "")
+    from app.twitch_eventsub import verify_eventsub_signature
+    if not verify_eventsub_signature(message_id, timestamp, raw, signature):
+        raise HTTPException(403, "Invalid EventSub signature")
+    try: body = json.loads(raw)
+    except json.JSONDecodeError as error: raise HTTPException(400, "Invalid JSON") from error
+    message_type = request.headers.get("twitch-eventsub-message-type", "")
+    if message_type == "webhook_callback_verification":
+        return Response(content=str(body.get("challenge", "")), media_type="text/plain")
+    # Twitch delivers at least once; Redis prevents duplicate scheduling.
+    try:
+        if not redis_client().set(f"twitch:eventsub:message:{message_id}", "1", nx=True, ex=86400):
+            return Response(status_code=204)
+    except Exception:
+        pass
+    if message_type == "notification" and body.get("subscription", {}).get("type") == "stream.online":
+        from app.worker.watcher import handle_twitch_stream_online
+        handle_twitch_stream_online.delay(body.get("event") or {})
+    elif message_type == "revocation":
+        revoked_id = body.get("subscription", {}).get("id")
+        if revoked_id:
+            with SessionLocal() as db:
+                _ensure_watchlist_schema(db); item = db.query(WatchlistSubscription).filter(WatchlistSubscription.eventsub_subscription_id == revoked_id).first()
+                if item: item.eventsub_subscription_id = None; db.commit()
+    return Response(status_code=204)
 
 @app.get("/notifications")
 def list_notifications():

@@ -1,8 +1,13 @@
 """Periodic creator watchlist checks and duplicate-safe delayed recording."""
 from __future__ import annotations
 
+import json
+import random
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import ProxyHandler, Request, build_opener
 from uuid import UUID
 
 from celery import shared_task
@@ -22,39 +27,79 @@ def delayed_action(status: str, lock_exists: bool) -> str:
 
 @shared_task(name="app.worker.watcher.check_watchlist_streams")
 def check_watchlist_streams() -> None:
-    # Runtime import avoids coupling the Celery boot path to the FastAPI app.
-    from app.main import _ensure_watchlist_schema, preview_stream
-
+    from app.main import _ensure_watchlist_schema
     with SessionLocal() as db:
         _ensure_watchlist_schema(db)
         subscriptions = db.query(WatchlistSubscription).filter(WatchlistSubscription.auto_record.is_(True)).all()
         for item in subscriptions:
-            try:
+            # EventSub channels receive push notifications and are never polled.
+            if item.platform == "twitch" and item.eventsub_subscription_id:
+                continue
+            if not redis_client().exists(f"watcher:backoff:{item.id}"):
+                check_watchlist_subscription.apply_async(args=[str(item.id)], countdown=random.randint(5, 25))
+
+
+def _queue_live_notification(db, item: WatchlistSubscription, stream_marker: str | None) -> None:
+    marker = str(stream_marker) if stream_marker else None
+    if item.is_currently_live and (not marker or marker == item.last_stream_id):
+        return
+    item.is_currently_live = True
+    if marker: item.last_stream_id = marker
+    notification = Notification(subscription_id=item.id, title=f"{item.display_name} بدأ البث الآن",
+        message=f"سيبدأ التسجيل التلقائي خلال {item.delay_seconds} ثانية ما لم تقم بالإلغاء أو تبدأ التسجيل يدوياً.",
+        channel_url=item.channel_url, status="pending_auto_record",
+        scheduled_for=datetime.now(timezone.utc) + timedelta(seconds=item.delay_seconds))
+    db.add(notification); db.flush()
+    trigger_delayed_auto_record.apply_async(args=[str(notification.id), item.channel_url], countdown=item.delay_seconds)
+
+
+def _kick_metadata(channel_slug: str) -> dict:
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", channel_slug):
+        raise ValueError("Invalid Kick channel slug")
+    from app.config import get_settings
+    settings = get_settings()
+    handlers = [ProxyHandler({"https": settings.watcher_proxy_url})] if settings.watcher_proxy_url else []
+    opener = build_opener(*handlers)
+    request = Request(f"https://kick.com/api/v2/channels/{channel_slug}", headers={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36","Accept":"application/json","Accept-Language":"en-US,en;q=0.9"})
+    with opener.open(request, timeout=10) as response:
+        data = json.loads(response.read(1_000_000))
+    live = data.get("livestream") or {}
+    return {"live":bool(live),"stream_id":str(live.get("id")) if live.get("id") else None}
+
+
+@shared_task(name="app.worker.watcher.check_watchlist_subscription")
+def check_watchlist_subscription(subscription_id: str) -> None:
+    client = redis_client()
+    with SessionLocal() as db:
+        item = db.get(WatchlistSubscription, UUID(subscription_id))
+        if item is None or not item.auto_record or (item.platform == "twitch" and item.eventsub_subscription_id): return
+        try:
+            if item.platform == "kick": metadata = _kick_metadata(item.channel_slug)
+            else:
+                from app.main import preview_stream
                 metadata = preview_stream(item.platform, item.channel_url)
-            except Exception:
-                continue
-            is_live = bool(metadata.get("live"))
-            stream_marker = metadata.get("stream_id")
-            is_new_live = is_live and (not item.is_currently_live or (stream_marker and stream_marker != item.last_stream_id))
-            item.is_currently_live = is_live
-            if not is_live:
-                item.last_stream_id = None
-                continue
-            if stream_marker:
-                item.last_stream_id = str(stream_marker)
-            if not is_new_live:
-                continue
-            scheduled_for = datetime.now(timezone.utc) + timedelta(seconds=item.delay_seconds)
-            notification = Notification(
-                subscription_id=item.id,
-                title=f"{item.display_name} بدأ البث الآن",
-                message=f"سيبدأ التسجيل التلقائي خلال {item.delay_seconds} ثانية ما لم تقم بالإلغاء أو تبدأ التسجيل يدوياً.",
-                channel_url=item.channel_url,
-                status="pending_auto_record",
-                scheduled_for=scheduled_for,
-            )
-            db.add(notification); db.flush()
-            trigger_delayed_auto_record.apply_async(args=[str(notification.id), item.channel_url], countdown=item.delay_seconds)
+            client.delete(f"watcher:failures:{item.id}", f"watcher:backoff:{item.id}")
+        except HTTPError as error:
+            failures = client.incr(f"watcher:failures:{item.id}"); client.expire(f"watcher:failures:{item.id}", 3600)
+            if error.code in {403, 429}: client.set(f"watcher:backoff:{item.id}", "1", ex=min(1800, 120 * (2 ** min(failures - 1, 4))))
+            return
+        except Exception:
+            return
+        if not metadata.get("live"):
+            item.is_currently_live = False; item.last_stream_id = None; db.commit(); return
+        _queue_live_notification(db, item, metadata.get("stream_id")); db.commit()
+
+
+@shared_task(name="app.worker.watcher.handle_twitch_stream_online")
+def handle_twitch_stream_online(event: dict) -> None:
+    broadcaster_id = str(event.get("broadcaster_user_id") or "")
+    if not broadcaster_id: return
+    with SessionLocal() as db:
+        item = db.query(WatchlistSubscription).filter(WatchlistSubscription.twitch_user_id == broadcaster_id).first()
+        if item is None: return
+        if event.get("broadcaster_user_name"): item.display_name = str(event["broadcaster_user_name"])[:120]
+        if item.auto_record: _queue_live_notification(db, item, str(event.get("id") or event.get("started_at") or ""))
+        else: item.is_currently_live = True
         db.commit()
 
 
