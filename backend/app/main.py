@@ -206,6 +206,7 @@ def stream_data(stream: Stream, clips: list[Clip] | None = None) -> dict:
               "ended_at": stream.ended_at, "error": stream.error_message, "stop_requested": stream.stop_requested, "layout_mode": stream.layout_mode, "remove_music": stream.remove_music, "thumbnail_url": presigned_download_url(stream.thumbnail_key) if stream.thumbnail_key else None, "target_clip_duration": stream.target_clip_duration}
     if clips is not None:
         result["clips"] = [{"id": str(c.id), "start_seconds": c.start_seconds, "end_seconds": c.end_seconds, "score": c.score,
+                            "viral_score":c.viral_score,"hook_title":c.hook_title,"highlight_reason":c.highlight_reason,"transcript_snippet":c.transcript_snippet or c.transcript,
                             "transcript": c.transcript, "url": presigned_download_url(c.vertical_key) if c.vertical_key else None, "thumbnail_url": presigned_download_url(c.thumbnail_key) if c.thumbnail_key else None} for c in clips]
     return result
 
@@ -224,6 +225,10 @@ def _ensure_preset_schema(db):
         db.execute(text("ALTER TABLE streams ADD COLUMN IF NOT EXISTS remove_music BOOLEAN NOT NULL DEFAULT FALSE"))
         db.execute(text("CREATE TABLE IF NOT EXISTS saved_thumbnails (id UUID PRIMARY KEY, kind VARCHAR(16) NOT NULL, storage_key TEXT NOT NULL UNIQUE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), CONSTRAINT saved_thumbnails_kind_check CHECK (kind IN ('vod', 'short')))"))
         db.execute(text("CREATE INDEX IF NOT EXISTS ix_saved_thumbnails_kind ON saved_thumbnails(kind)"))
+        db.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS viral_score INTEGER NOT NULL DEFAULT 0"))
+        db.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS hook_title VARCHAR(160)"))
+        db.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS highlight_reason VARCHAR(120)"))
+        db.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS transcript_snippet TEXT"))
         db.commit()
 
 def _ensure_watchlist_schema(db):
@@ -607,21 +612,23 @@ def list_streams():
 def list_archive_shorts():
     """Flatten generated Shorts for the archive without making the dashboard poll each VOD."""
     with SessionLocal() as db:
-        rows = db.query(Clip, Stream).join(Stream, Clip.stream_id == Stream.id).order_by(Stream.created_at.desc(), Clip.start_seconds).all()
+        _ensure_preset_schema(db)
+        rows = db.query(Clip, Stream).join(Stream, Clip.stream_id == Stream.id).order_by(Stream.created_at.desc(), Clip.viral_score.desc()).all()
         return [{
             "id": str(clip.id), "stream_id": str(stream.id), "source_url": stream.source_url,
             "platform": stream.platform, "remove_music": stream.remove_music,
             "start_seconds": clip.start_seconds, "end_seconds": clip.end_seconds,
-            "transcript": clip.transcript, "url": presigned_download_url(clip.vertical_key) if clip.vertical_key else None,
+            "transcript": clip.transcript, "transcript_snippet":clip.transcript_snippet or clip.transcript,"viral_score":clip.viral_score,"hook_title":clip.hook_title,"highlight_reason":clip.highlight_reason,"url": presigned_download_url(clip.vertical_key) if clip.vertical_key else None,
             "thumbnail_url": presigned_download_url(clip.thumbnail_key) if clip.thumbnail_key else None,
         } for clip, stream in rows]
 
 @app.get("/streams/{stream_id}")
 def stream_status(stream_id: UUID):
     with SessionLocal() as db:
+        _ensure_preset_schema(db)
         stream = db.get(Stream, stream_id)
         if stream is None: raise HTTPException(404, "Stream not found")
-        clips = db.query(Clip).filter(Clip.stream_id == stream_id).order_by(Clip.start_seconds).all()
+        clips = db.query(Clip).filter(Clip.stream_id == stream_id).order_by(Clip.viral_score.desc(), Clip.start_seconds).all()
         return stream_data(stream, clips)
 
 @app.post("/streams/{stream_id}/stop", status_code=202)

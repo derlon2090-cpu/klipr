@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 from uuid import UUID, uuid4
-from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, String, Text, func
+from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 from .db import Base
@@ -128,3 +128,7 @@ class Clip(Base):
     captions_key: Mapped[str | None] = mapped_column(Text)
     transcript: Mapped[str | None] = mapped_column(Text)
     thumbnail_key: Mapped[str | None] = mapped_column(Text)
+    viral_score: Mapped[int] = mapped_column(Integer, default=0)
+    hook_title: Mapped[str | None] = mapped_column(String(160))
+    highlight_reason: Mapped[str | None] = mapped_column(String(120))
+    transcript_snippet: Mapped[str | None] = mapped_column(Text)

@@ -1,0 +1,5 @@
+ALTER TABLE clips ADD COLUMN IF NOT EXISTS viral_score INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE clips ADD COLUMN IF NOT EXISTS hook_title VARCHAR(160);
+ALTER TABLE clips ADD COLUMN IF NOT EXISTS highlight_reason VARCHAR(120);
+ALTER TABLE clips ADD COLUMN IF NOT EXISTS transcript_snippet TEXT;
+CREATE INDEX IF NOT EXISTS ix_clips_viral_score ON clips(stream_id, viral_score DESC);

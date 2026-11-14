@@ -7,17 +7,13 @@ from pathlib import Path
 from uuid import UUID
 import numpy as np
 from celery import shared_task
+from sqlalchemy import text
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import Clip, Stream, StreamStatus
 from app.storage import download_file, upload_file
 from .tasks import WORK_ROOT, _set_status
-
-@dataclass(frozen=True)
-class Word:
-    start: float
-    end: float
-    text: str
+from .highlight_analyzer import Word, analyze_highlights
 
 @dataclass(frozen=True)
 class Window:
@@ -151,14 +147,15 @@ def process_stream_highlights(stream_id: str, max_clips: int = 3) -> None:
             intro_thumbnail = job_dir / f"intro-thumbnail{Path(short_thumbnail_key).suffix or '.png'}"
             download_file(short_thumbnail_key, intro_thumbnail)
         extract_audio(vod, wav)
-        energy, duration = rms_windows(wav)
-        words = transcribe(wav)
-        windows = choose_windows(energy, duration, words, target_seconds, max_clips)
+        highlights = analyze_highlights(wav, job_dir / "candidate-audio", target_seconds, max_clips)
         with SessionLocal() as db:
+            if db.bind.dialect.name == "postgresql":
+                db.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS viral_score INTEGER NOT NULL DEFAULT 0")); db.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS hook_title VARCHAR(160)")); db.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS highlight_reason VARCHAR(120)")); db.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS transcript_snippet TEXT")); db.commit()
             db.query(Clip).filter(Clip.stream_id == sid).delete()
-            for index, window in enumerate(windows, 1):
+            for index, highlight in enumerate(highlights, 1):
+                window = Window(highlight.start, highlight.end, highlight.viral_score / 100)
                 ass, output = job_dir / f"highlight-{index}.ass", job_dir / f"highlight-{index}.mp4"
-                snippet = write_ass(words, window.start, window.end, ass)
+                snippet = write_ass(list(highlight.words), window.start, window.end, ass)
                 if intro_thumbnail:
                     raw_output = job_dir / f"highlight-{index}-raw.mp4"
                     render_vertical(vod, ass, window, raw_output, layout_mode)
@@ -173,12 +170,12 @@ def process_stream_highlights(stream_id: str, max_clips: int = 3) -> None:
                 key = f"clips/{stream_id}/highlight-{index}.mp4"
                 upload_file(output, key, "video/mp4")
                 from .thumbnails import make_thumbnail
-                cover = job_dir / f"highlight-{index}.png"; make_thumbnail(None, cover, platform, "CLIP", headline or snippet[:42], portrait=True)
+                cover = job_dir / f"highlight-{index}.png"; make_thumbnail(None, cover, platform, "CLIP", headline or highlight.hook_title, portrait=True)
                 thumb_key = f"clips/{stream_id}/highlight-{index}.png"; upload_file(cover, thumb_key, "image/png")
-                db.add(Clip(stream_id=sid, start_seconds=window.start, end_seconds=window.end, score=window.score, vertical_key=key, thumbnail_key=thumb_key, transcript=snippet))
+                db.add(Clip(stream_id=sid, start_seconds=window.start, end_seconds=window.end, score=window.score, viral_score=highlight.viral_score, hook_title=highlight.hook_title, highlight_reason=highlight.reason, transcript_snippet=snippet, vertical_key=key, thumbnail_key=thumb_key, transcript=snippet))
             db.commit()
         _set_status(sid, StreamStatus.ready)
-        send_discord_notification(stream_id, webhook_url, len(windows))
+        send_discord_notification(stream_id, webhook_url, len(highlights))
     except Exception as error:
         _set_status(sid, StreamStatus.failed, error_message=f"Highlight processing failed: {error}")
         raise

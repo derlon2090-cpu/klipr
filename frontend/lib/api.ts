@@ -10,6 +10,10 @@ export type Clip = {
   start_seconds: number;
   end_seconds: number;
   score: number;
+  viral_score?: number;
+  hook_title?: string | null;
+  highlight_reason?: string | null;
+  transcript_snippet?: string | null;
   transcript: string | null;
   url: string | null;
   thumbnail_url?: string | null;

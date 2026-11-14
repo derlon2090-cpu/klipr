@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     twitch_eventsub_secret: str = ""
     twitch_eventsub_callback_url: str = ""
     watcher_proxy_url: str | None = None
+    ollama_url: str | None = None
+    ollama_model: str = "qwen3:1.7b"
 
 
 @lru_cache

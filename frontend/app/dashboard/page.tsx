@@ -1015,6 +1015,7 @@ export default function Dashboard() {
             {clip.thumbnail_url ? <img src={clip.thumbnail_url} alt="Short thumbnail" className="aspect-[9/16] w-full rounded-xl object-cover" /> : <video controls src={clip.url || undefined} className="aspect-[9/16] w-full rounded-xl bg-slate-950 object-cover" />}
             <div className="mt-3 flex items-center justify-between"><span className={`rounded-full px-2 py-1 text-[10px] font-black ${platformClass(clip.platform)}`}>{clip.platform.toUpperCase()} · SHORT</span><span className="text-xs text-slate-500">{Math.round(clip.end_seconds - clip.start_seconds)}s</span></div>
             <p className="mt-2 truncate text-sm font-black">{handle({ source_url: clip.source_url } as Stream)}</p>
+            <div className="mt-2 rounded-lg bg-slate-50 p-2"><div className="flex items-start justify-between gap-2"><p className="line-clamp-2 text-xs font-black">{clip.hook_title || (ar ? "لقطة قوية من البث" : "Powerful stream moment")}</p><span className="shrink-0 text-[10px] font-black text-orange-700">🔥 {clip.viral_score ?? Math.round(clip.score * 100)}%</span></div>{clip.highlight_reason && <p className="mt-1 text-[10px] font-bold text-emerald-700">{clip.highlight_reason}</p>}</div>
             <div className="mt-3 grid grid-cols-2 gap-2"><a href={clip.url || undefined} download className="inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-500 px-3 py-2 text-xs font-bold text-white"><Download size={14} />{ar ? "تحميل" : "Download"}</a><label className="inline-flex cursor-pointer items-center justify-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold"><Upload size={14} />{ar ? "رفع غلاف" : "Upload cover"}<input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => uploadShortThumbnail(clip.id, e.target.files?.[0])} /></label></div>
           </article>)}
         </div>
@@ -1200,6 +1201,7 @@ export default function Dashboard() {
                       {Math.round(clip.end_seconds - clip.start_seconds)}s
                     </span>
                   </div>
+                  <div className="mt-3 rounded-xl bg-slate-50 p-3"><div className="flex items-start justify-between gap-2"><h3 className="font-black leading-5">{clip.hook_title || (ar ? "لقطة قوية من البث" : "Powerful stream moment")}</h3><span className="shrink-0 rounded-full bg-orange-100 px-2 py-1 text-[10px] font-black text-orange-700">🔥 {clip.viral_score ?? Math.round(clip.score * 100)}% Viral</span></div>{clip.highlight_reason && <p className="mt-2 text-xs font-bold text-emerald-700">{clip.highlight_reason}</p>}</div>
                   <div className="mt-3 grid gap-2">
                     {clip.url && (
                       <a
