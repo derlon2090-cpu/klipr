@@ -2,6 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 * { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
 body { margin: 0; background: #f8fafc; color: #0f172a; font-family: "Avenir Next", "Arial Rounded MT Bold", "Plus Jakarta Sans", Cairo, Arial, system-ui, sans-serif; }
 button, input { font: inherit; }
 button { cursor: pointer; }
