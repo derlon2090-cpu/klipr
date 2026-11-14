@@ -14,6 +14,12 @@ export type Clip = {
   url: string | null;
   thumbnail_url?: string | null;
 };
+export type ArchiveShort = Clip & {
+  stream_id: string;
+  source_url: string;
+  platform: "twitch" | "kick";
+  remove_music: boolean;
+};
 export type Stream = {
   id: string;
   source_url: string;
@@ -102,6 +108,7 @@ export const api = {
   me: () => request<{ email: string }>("/auth/me"),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
   streams: () => request<Stream[]>("/streams"),
+  archiveShorts: () => request<ArchiveShort[]>("/archive/shorts"),
   stream: (id: string) => request<Stream>(`/streams/${id}`),
   preview: (stream_url: string) =>
     request<StreamPreview>("/streams/preview", {
@@ -175,4 +182,12 @@ export const api = {
   },
   deleteThumbnail: (kind: "vod" | "short") =>
     request<void>(`/branding/thumbnail?kind=${kind}`, { method: "DELETE" }),
+  uploadRecordingThumbnail: (id: string, file: File) => {
+    const body = new FormData(); body.append("file", file);
+    return upload<{ key: string; url: string }>(`/recordings/${id}/thumbnail`, body);
+  },
+  uploadClipThumbnail: (id: string, file: File) => {
+    const body = new FormData(); body.append("file", file);
+    return upload<{ key: string; url: string }>(`/clips/${id}/thumbnail`, body);
+  },
 };

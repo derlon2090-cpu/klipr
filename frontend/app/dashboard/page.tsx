@@ -17,7 +17,7 @@ import {
   WandSparkles,
   X,
 } from "lucide-react";
-import { api, Branding, Stream, StreamPreview } from "@/lib/api";
+import { api, ArchiveShort, Branding, Stream, StreamPreview } from "@/lib/api";
 import { DashboardSection, Shell } from "@/components/shell";
 import { StatusBadge } from "@/components/status";
 import { useLanguage } from "@/components/language";
@@ -116,6 +116,7 @@ export default function Dashboard() {
   const ar = language === "ar";
   const [section, setSection] = useState<DashboardSection>("live"),
     [streams, setStreams] = useState<Stream[]>([]),
+    [archiveShorts, setArchiveShorts] = useState<ArchiveShort[]>([]),
     [detailed, setDetailed] = useState<Stream | null>(null),
     [url, setUrl] = useState(""),
     [preview, setPreview] = useState<StreamPreview | null>(null),
@@ -126,6 +127,7 @@ export default function Dashboard() {
   const [removeMusic, setRemoveMusic] = useState(false);
   const [search, setSearch] = useState(""),
     [filter, setFilter] = useState<"all" | "twitch" | "kick">("all"),
+    [archiveKind, setArchiveKind] = useState<"vod" | "short">("vod"),
     [deleting, setDeleting] = useState<string | null>(null);
   const [selected, setSelected] = useState(""),
     [clipDuration, setClipDuration] = useState(30),
@@ -140,7 +142,9 @@ export default function Dashboard() {
 
   const load = async () => {
     try {
-      setStreams(await api.streams());
+      const [nextStreams, nextShorts] = await Promise.all([api.streams(), api.archiveShorts()]);
+      setStreams(nextStreams);
+      setArchiveShorts(nextShorts);
     } catch (e) {
       setMessage(
         e instanceof Error
@@ -215,6 +219,11 @@ export default function Dashboard() {
         `${handle(s)} ${s.source_url}`
           .toLowerCase()
           .includes(search.toLowerCase())),
+  );
+  const visibleArchiveShorts = archiveShorts.filter(
+    (clip) =>
+      (filter === "all" || clip.platform === filter) &&
+      (!search.trim() || `${handle({ source_url: clip.source_url } as Stream)} ${clip.transcript || ""}`.toLowerCase().includes(search.toLowerCase())),
   );
   const changeSection = (next: DashboardSection) => {
     setSection(next);
@@ -488,6 +497,24 @@ export default function Dashboard() {
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Request failed");
     }
+  };
+  const uploadRecordingThumbnail = async (streamId: string, file?: File) => {
+    if (!file) return;
+    try {
+      const result = await api.uploadRecordingThumbnail(streamId, file);
+      setStreams((current) => current.map((stream) => stream.id === streamId ? { ...stream, thumbnail_url: result.url } : stream));
+      if (detailed?.id === streamId) setDetailed({ ...detailed, thumbnail_url: result.url });
+      setMessage(ar ? "تم حفظ غلاف البث وربطه بالأرشيف." : "VOD cover saved to the archive.");
+    } catch (e) { setMessage(e instanceof Error ? e.message : "Upload failed"); }
+  };
+  const uploadShortThumbnail = async (clipId: string, file?: File) => {
+    if (!file) return;
+    try {
+      const result = await api.uploadClipThumbnail(clipId, file);
+      setArchiveShorts((current) => current.map((clip) => clip.id === clipId ? { ...clip, thumbnail_url: result.url } : clip));
+      if (detailed) setDetailed({ ...detailed, clips: detailed.clips?.map((clip) => clip.id === clipId ? { ...clip, thumbnail_url: result.url } : clip) });
+      setMessage(ar ? "تم حفظ غلاف الشورت وربطه بالمكتبة." : "Short cover saved to the library.");
+    } catch (e) { setMessage(e instanceof Error ? e.message : "Upload failed"); }
   };
 
   const picker = (
@@ -847,7 +874,10 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
-      {visibleArchive.length ? (
+      <div className="mb-5 inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+        {(["vod", "short"] as const).map((value) => <button key={value} onClick={() => setArchiveKind(value)} className={`rounded-lg px-4 py-2 text-sm font-black ${archiveKind === value ? "bg-emerald-500 text-white" : "text-slate-500"}`}>{value === "vod" ? (ar ? "البثوث" : "VODs") : (ar ? `الشورتات (${archiveShorts.length})` : `Shorts (${archiveShorts.length})`)}</button>)}
+      </div>
+      {archiveKind === "vod" && (visibleArchive.length ? (
         <div className="grid gap-5 md:grid-cols-2 2xl:grid-cols-3">
           {visibleArchive.map((stream) => (
             <article
@@ -929,6 +959,10 @@ export default function Dashboard() {
                     <ImageIcon size={14} />
                     {ar ? "صانع الغلاف" : "Thumbnail studio"}
                   </button>
+                  <label className="inline-flex cursor-pointer items-center justify-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold">
+                    <Upload size={14} />{ar ? "رفع غلاف" : "Upload cover"}
+                    <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => uploadRecordingThumbnail(stream.id, e.target.files?.[0])} />
+                  </label>
                 </div>
                 <button
                   onClick={() => setDeleting(stream.id)}
@@ -949,7 +983,17 @@ export default function Dashboard() {
               : "No recordings match your search."
           }
         />
-      )}
+      ))}
+      {archiveKind === "short" && (visibleArchiveShorts.length ? (
+        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+          {visibleArchiveShorts.map((clip) => <article key={clip.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            {clip.thumbnail_url ? <img src={clip.thumbnail_url} alt="Short thumbnail" className="aspect-[9/16] w-full rounded-xl object-cover" /> : <video controls src={clip.url || undefined} className="aspect-[9/16] w-full rounded-xl bg-slate-950 object-cover" />}
+            <div className="mt-3 flex items-center justify-between"><span className={`rounded-full px-2 py-1 text-[10px] font-black ${platformClass(clip.platform)}`}>{clip.platform.toUpperCase()} · SHORT</span><span className="text-xs text-slate-500">{Math.round(clip.end_seconds - clip.start_seconds)}s</span></div>
+            <p className="mt-2 truncate text-sm font-black">{handle({ source_url: clip.source_url } as Stream)}</p>
+            <div className="mt-3 grid grid-cols-2 gap-2"><a href={clip.url || undefined} download className="inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-500 px-3 py-2 text-xs font-bold text-white"><Download size={14} />{ar ? "تحميل" : "Download"}</a><label className="inline-flex cursor-pointer items-center justify-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold"><Upload size={14} />{ar ? "رفع غلاف" : "Upload cover"}<input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => uploadShortThumbnail(clip.id, e.target.files?.[0])} /></label></div>
+          </article>)}
+        </div>
+      ) : <Empty text={ar ? "لم تُولّد شورتات بعد. ستُحفظ هنا تلقائيًا عند اكتمال التوليد." : "No Shorts yet. Generated Shorts are saved here automatically."} />)}
     </>
   );
 
@@ -1338,10 +1382,6 @@ export default function Dashboard() {
               }
               className="size-5 accent-emerald-500"
             />
-          </label>
-          <label className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-            <input type="checkbox" checked={branding.remove_music} onChange={(e) => setBranding({ ...branding, remove_music: e.target.checked })} className="mt-1 size-5 accent-emerald-500" />
-            <span><span className="block font-black">{ar ? "إزالة الأغاني وموسيقى الدونيشن تلقائياً (DMCA Safe)" : "Remove donation songs & music automatically (DMCA Safe)"}</span><span className="mt-1 block text-xs font-normal leading-5 text-slate-600">{ar ? "إعداد افتراضي للتسجيلات الجديدة: تُزال الموسيقى مع الحفاظ على صوت الستريمر." : "Default for new recordings: music is removed while the streamer voice remains clear."}</span></span>
           </label>
           <label className="block text-sm font-black">
             {ar

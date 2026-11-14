@@ -287,6 +287,52 @@ def delete_branding_thumbnail(kind: str = "vod"):
         db.commit()
     if old: delete_files([old])
 
+async def _validated_thumbnail(file: UploadFile) -> tuple[bytes, str, str]:
+    """Accept only bounded image uploads before sending them to object storage."""
+    data = await file.read()
+    is_png = data.startswith(b"\x89PNG\r\n\x1a\n")
+    is_jpg = data.startswith(b"\xff\xd8\xff")
+    is_webp = data.startswith(b"RIFF") and data[8:12] == b"WEBP"
+    if len(data) > 8 * 1024 * 1024 or not (is_png or is_jpg or is_webp):
+        raise HTTPException(422, "Thumbnail must be a PNG, JPG, or WebP under 8MB")
+    return data, ".png" if is_png else ".jpg" if is_jpg else ".webp", "image/png" if is_png else "image/jpeg" if is_jpg else "image/webp"
+
+@app.post("/recordings/{stream_id}/thumbnail")
+async def upload_recording_thumbnail(stream_id: UUID, file: UploadFile = File(...)):
+    data, suffix, content_type = await _validated_thumbnail(file)
+    import tempfile
+    with SessionLocal() as db:
+        stream = db.get(Stream, stream_id)
+        if stream is None: raise HTTPException(404, "Stream not found")
+        old = stream.thumbnail_key
+        key = f"streams/{stream_id}/custom-thumbnail-{secrets.token_hex(8)}{suffix}"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temp: temp.write(data); path = Path(temp.name)
+        try:
+            upload_file(path, key, content_type)
+            stream.thumbnail_key = key; db.commit()
+        finally:
+            path.unlink(missing_ok=True)
+    if old: delete_files([old])
+    return {"key": key, "url": presigned_download_url(key)}
+
+@app.post("/clips/{clip_id}/thumbnail")
+async def upload_clip_thumbnail(clip_id: UUID, file: UploadFile = File(...)):
+    data, suffix, content_type = await _validated_thumbnail(file)
+    import tempfile
+    with SessionLocal() as db:
+        clip = db.get(Clip, clip_id)
+        if clip is None: raise HTTPException(404, "Clip not found")
+        old = clip.thumbnail_key
+        key = f"clips/{clip.stream_id}/custom-thumbnail-{clip_id}-{secrets.token_hex(8)}{suffix}"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temp: temp.write(data); path = Path(temp.name)
+        try:
+            upload_file(path, key, content_type)
+            clip.thumbnail_key = key; db.commit()
+        finally:
+            path.unlink(missing_ok=True)
+    if old: delete_files([old])
+    return {"key": key, "url": presigned_download_url(key)}
+
 
 @app.post("/auth/password")
 def verify_password(payload: PasswordRequest, request: Request, response: Response):
@@ -395,6 +441,19 @@ def list_streams():
         streams = db.query(Stream).order_by(Stream.created_at.desc()).all()
         counts = dict(db.query(Clip.stream_id, func.count(Clip.id)).group_by(Clip.stream_id).all())
         return [{**stream_data(stream), "clip_count": counts.get(stream.id, 0)} for stream in streams]
+
+@app.get("/archive/shorts")
+def list_archive_shorts():
+    """Flatten generated Shorts for the archive without making the dashboard poll each VOD."""
+    with SessionLocal() as db:
+        rows = db.query(Clip, Stream).join(Stream, Clip.stream_id == Stream.id).order_by(Stream.created_at.desc(), Clip.start_seconds).all()
+        return [{
+            "id": str(clip.id), "stream_id": str(stream.id), "source_url": stream.source_url,
+            "platform": stream.platform, "remove_music": stream.remove_music,
+            "start_seconds": clip.start_seconds, "end_seconds": clip.end_seconds,
+            "transcript": clip.transcript, "url": presigned_download_url(clip.vertical_key) if clip.vertical_key else None,
+            "thumbnail_url": presigned_download_url(clip.thumbnail_key) if clip.thumbnail_key else None,
+        } for clip, stream in rows]
 
 @app.get("/streams/{stream_id}")
 def stream_status(stream_id: UUID):
