@@ -87,6 +87,16 @@ class Notification(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class CreatorSuggestion(Base):
+    __tablename__ = "creator_suggestions"
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    creator_name: Mapped[str] = mapped_column(String(120), index=True)
+    platform: Mapped[str] = mapped_column(String(16), index=True)
+    channel_url: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default="new", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Stream(Base):
     __tablename__ = "streams"
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)

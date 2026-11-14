@@ -11,11 +11,11 @@ from urllib.parse import urlparse, urlunparse
 from uuid import UUID
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, text
 from app.db import SessionLocal
 from app.config import get_settings
-from app.models import ArchiveBranding, Clip, Notification, SavedThumbnail, Stream, StreamStatus, WatchlistSubscription
+from app.models import ArchiveBranding, Clip, CreatorSuggestion, Notification, SavedThumbnail, Stream, StreamStatus, WatchlistSubscription
 from app.storage import copy_file, delete_files, presigned_download_url, upload_file
 from app.worker.tasks import WORK_ROOT, active_key, record_stream, redis_client, stop_key, task_key
 
@@ -95,7 +95,8 @@ def _reserve_recording_slot(owner_key: str, stream_id: str) -> bool:
 async def require_klipr_session(request: Request, call_next):
     public_paths = {"/health", "/auth/password", "/auth/email", "/auth/me", "/webhooks/twitch/eventsub", "/docs", "/openapi.json"}
     path = request.url.path.removeprefix("/api") or "/"
-    if request.method == "OPTIONS" or path in public_paths or _read_token(request.cookies.get("klipr_session"), "session"):
+    public_suggestion = path == "/creator-suggestions" and request.method == "POST"
+    if request.method == "OPTIONS" or path in public_paths or public_suggestion or _read_token(request.cookies.get("klipr_session"), "session"):
         return await call_next(request)
     return Response(content=json.dumps({"detail": "Authentication required"}), status_code=401, media_type="application/json")
 
@@ -131,6 +132,36 @@ class WatchlistRequest(BaseModel):
 class WatchlistPatch(BaseModel):
     auto_record: bool | None = None
     delay_seconds: int | None = None
+class CreatorSuggestionRequest(BaseModel):
+    creator_name: str = Field(min_length=2, max_length=120)
+    platform: str
+    channel_url: str | None = Field(default=None, max_length=500)
+
+    @field_validator("creator_name")
+    @classmethod
+    def clean_creator_name(cls, value: str) -> str:
+        cleaned = " ".join(value.split())
+        if len(cleaned) < 2:
+            raise ValueError("Creator name is too short")
+        return cleaned
+
+    @field_validator("platform")
+    @classmethod
+    def validate_platform(cls, value: str) -> str:
+        platform = value.strip().lower()
+        if platform not in {"twitch", "kick"}:
+            raise ValueError("Platform must be Twitch or Kick")
+        return platform
+
+class CreatorSuggestionPatch(BaseModel):
+    status: str
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, value: str) -> str:
+        if value not in {"new", "reviewed"}:
+            raise ValueError("Status must be new or reviewed")
+        return value
 class PasswordRequest(BaseModel): password: str
 class EmailRequest(BaseModel): email: str
 
@@ -239,6 +270,52 @@ def _ensure_watchlist_schema(db):
         db.execute(text("ALTER TABLE watchlist_subscriptions ADD COLUMN IF NOT EXISTS eventsub_subscription_id VARCHAR(255)"))
         db.execute(text("CREATE INDEX IF NOT EXISTS ix_notifications_created_at ON notifications(created_at DESC)"))
         db.commit()
+
+def _ensure_suggestions_schema(db):
+    if db.bind.dialect.name == "postgresql":
+        db.execute(text("CREATE TABLE IF NOT EXISTS creator_suggestions (id UUID PRIMARY KEY, creator_name VARCHAR(120) NOT NULL, platform VARCHAR(16) NOT NULL, channel_url TEXT, status VARCHAR(16) NOT NULL DEFAULT 'new', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), CONSTRAINT creator_suggestions_platform_check CHECK (platform IN ('twitch','kick')), CONSTRAINT creator_suggestions_status_check CHECK (status IN ('new','reviewed')))"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS ix_creator_suggestions_status_created ON creator_suggestions(status, created_at DESC)"))
+        db.commit()
+
+def _suggestion_data(item: CreatorSuggestion) -> dict:
+    return {"id": str(item.id), "creator_name": item.creator_name, "platform": item.platform, "channel_url": item.channel_url, "status": item.status, "created_at": item.created_at}
+
+@app.post("/creator-suggestions", status_code=201)
+def create_creator_suggestion(payload: CreatorSuggestionRequest):
+    channel_url = (payload.channel_url or "").strip() or None
+    if channel_url:
+        platform, channel_url = normalize_live_url(channel_url)
+        if platform != payload.platform:
+            raise HTTPException(422, "Channel URL does not match the selected platform")
+    with SessionLocal() as db:
+        _ensure_suggestions_schema(db)
+        item = CreatorSuggestion(creator_name=payload.creator_name, platform=payload.platform, channel_url=channel_url, status="new")
+        db.add(item); db.commit(); db.refresh(item)
+        return _suggestion_data(item)
+
+@app.get("/creator-suggestions")
+def list_creator_suggestions():
+    with SessionLocal() as db:
+        _ensure_suggestions_schema(db)
+        items = db.query(CreatorSuggestion).order_by(CreatorSuggestion.created_at.desc()).all()
+        return [_suggestion_data(item) for item in items]
+
+@app.patch("/creator-suggestions/{suggestion_id}")
+def update_creator_suggestion(suggestion_id: UUID, payload: CreatorSuggestionPatch):
+    with SessionLocal() as db:
+        _ensure_suggestions_schema(db)
+        item = db.get(CreatorSuggestion, suggestion_id)
+        if item is None: raise HTTPException(404, "Suggestion not found")
+        item.status = payload.status; db.commit(); db.refresh(item)
+        return _suggestion_data(item)
+
+@app.delete("/creator-suggestions/{suggestion_id}", status_code=204)
+def delete_creator_suggestion(suggestion_id: UUID):
+    with SessionLocal() as db:
+        _ensure_suggestions_schema(db)
+        item = db.get(CreatorSuggestion, suggestion_id)
+        if item is None: raise HTTPException(404, "Suggestion not found")
+        db.delete(item); db.commit()
 def _branding(db):
     _ensure_preset_schema(db)
     item = db.get(ArchiveBranding, 1)

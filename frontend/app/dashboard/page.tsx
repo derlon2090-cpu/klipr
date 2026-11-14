@@ -3,10 +3,13 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Archive,
   Check,
+  CheckCircle2,
   Clock3,
   Download,
+  ExternalLink,
   Film,
   Image as ImageIcon,
+  MessageSquareText,
   Play,
   Radio,
   Search,
@@ -17,7 +20,15 @@ import {
   WandSparkles,
   X,
 } from "lucide-react";
-import { api, ArchiveShort, Branding, SavedThumbnail, Stream, StreamPreview } from "@/lib/api";
+import {
+  api,
+  ArchiveShort,
+  Branding,
+  CreatorSuggestion,
+  SavedThumbnail,
+  Stream,
+  StreamPreview,
+} from "@/lib/api";
 import { DashboardSection, Shell } from "@/components/shell";
 import { StatusBadge } from "@/components/status";
 import { useLanguage } from "@/components/language";
@@ -44,6 +55,7 @@ const validSections: DashboardSection[] = [
   "shorts",
   "thumbnail",
   "branding",
+  "suggestions",
 ];
 const platformClass = (platform: string) =>
   platform === "twitch"
@@ -140,10 +152,32 @@ export default function Dashboard() {
     [savedThumbnails, setSavedThumbnails] = useState<SavedThumbnail[]>([]),
     [logoPreview, setLogoPreview] = useState<string | null>(null),
     [savingBrand, setSavingBrand] = useState(false);
+  const [suggestions, setSuggestions] = useState<CreatorSuggestion[]>([]),
+    [suggestionsBusy, setSuggestionsBusy] = useState(false);
+
+  const loadSuggestions = async () => {
+    setSuggestionsBusy(true);
+    try {
+      setSuggestions(await api.creatorSuggestions());
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : ar
+            ? "تعذّر تحميل الاقتراحات"
+            : "Could not load suggestions",
+      );
+    } finally {
+      setSuggestionsBusy(false);
+    }
+  };
 
   const load = async () => {
     try {
-      const [nextStreams, nextShorts] = await Promise.all([api.streams(), api.archiveShorts()]);
+      const [nextStreams, nextShorts] = await Promise.all([
+        api.streams(),
+        api.archiveShorts(),
+      ]);
       setStreams(nextStreams);
       setArchiveShorts(nextShorts);
     } catch (e) {
@@ -172,6 +206,9 @@ export default function Dashboard() {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
+  useEffect(() => {
+    if (section === "suggestions") loadSuggestions();
+  }, [section]);
   useEffect(() => {
     const value = url.trim();
     setPreview(null);
@@ -224,7 +261,10 @@ export default function Dashboard() {
   const visibleArchiveShorts = archiveShorts.filter(
     (clip) =>
       (filter === "all" || clip.platform === filter) &&
-      (!search.trim() || `${handle({ source_url: clip.source_url } as Stream)} ${clip.transcript || ""}`.toLowerCase().includes(search.toLowerCase())),
+      (!search.trim() ||
+        `${handle({ source_url: clip.source_url } as Stream)} ${clip.transcript || ""}`
+          .toLowerCase()
+          .includes(search.toLowerCase())),
   );
   const changeSection = (next: DashboardSection) => {
     setSection(next);
@@ -504,41 +544,146 @@ export default function Dashboard() {
   const chooseSavedThumbnail = async (thumbnail: SavedThumbnail) => {
     try {
       const selectedThumbnail = await api.selectThumbnail(thumbnail.id);
-      setSavedThumbnails((current) => current.map((item) => ({ ...item, selected: item.kind === thumbnail.kind ? item.id === thumbnail.id : item.selected })));
-      setBranding((current) => thumbnail.kind === "short" ? { ...current, default_short_thumbnail_key: selectedThumbnail.key, default_short_thumbnail_url: selectedThumbnail.url } : { ...current, default_thumbnail_key: selectedThumbnail.key, default_thumbnail_url: selectedThumbnail.url, use_default_thumbnail: true });
+      setSavedThumbnails((current) =>
+        current.map((item) => ({
+          ...item,
+          selected:
+            item.kind === thumbnail.kind
+              ? item.id === thumbnail.id
+              : item.selected,
+        })),
+      );
+      setBranding((current) =>
+        thumbnail.kind === "short"
+          ? {
+              ...current,
+              default_short_thumbnail_key: selectedThumbnail.key,
+              default_short_thumbnail_url: selectedThumbnail.url,
+            }
+          : {
+              ...current,
+              default_thumbnail_key: selectedThumbnail.key,
+              default_thumbnail_url: selectedThumbnail.url,
+              use_default_thumbnail: true,
+            },
+      );
       if (thumbnail.kind === "short") setEmbedCover(true);
-      setMessage(ar ? "تم اختيار الثامبنيل وتفعيلها تلقائيًا." : "Thumbnail selected and activated.");
-    } catch (e) { setMessage(e instanceof Error ? e.message : "Request failed"); }
+      setMessage(
+        ar
+          ? "تم اختيار الثامبنيل وتفعيلها تلقائيًا."
+          : "Thumbnail selected and activated.",
+      );
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Request failed");
+    }
   };
   const removeSavedThumbnail = async (thumbnail: SavedThumbnail) => {
     try {
       await api.deleteSavedThumbnail(thumbnail.id);
-      setSavedThumbnails((current) => current.filter((item) => item.id !== thumbnail.id));
-      if (thumbnail.selected) setBranding((current) => thumbnail.kind === "short" ? { ...current, default_short_thumbnail_key: null, default_short_thumbnail_url: null } : { ...current, default_thumbnail_key: null, default_thumbnail_url: null, use_default_thumbnail: false });
-    } catch (e) { setMessage(e instanceof Error ? e.message : "Request failed"); }
+      setSavedThumbnails((current) =>
+        current.filter((item) => item.id !== thumbnail.id),
+      );
+      if (thumbnail.selected)
+        setBranding((current) =>
+          thumbnail.kind === "short"
+            ? {
+                ...current,
+                default_short_thumbnail_key: null,
+                default_short_thumbnail_url: null,
+              }
+            : {
+                ...current,
+                default_thumbnail_key: null,
+                default_thumbnail_url: null,
+                use_default_thumbnail: false,
+              },
+        );
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Request failed");
+    }
   };
   const thumbnailChoices = (kind: "vod" | "short", compact = false) => {
     const items = savedThumbnails.filter((item) => item.kind === kind);
-    if (!items.length) return <p className="mt-3 text-xs text-slate-400">{ar ? "لا توجد ثامبنيلات محفوظة بهذا المقاس بعد." : "No saved thumbnails in this format yet."}</p>;
-    return <div className={`mt-3 grid gap-2 ${compact ? (kind === "short" ? "grid-cols-4" : "grid-cols-3") : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4"}`}>{items.map((item) => <button type="button" key={item.id} onClick={() => chooseSavedThumbnail(item)} className={`group relative overflow-hidden rounded-xl border-2 bg-slate-100 ${item.selected ? "border-emerald-500 ring-2 ring-emerald-100" : "border-transparent hover:border-slate-300"}`}><img src={item.url} alt="Saved thumbnail" className={`${kind === "short" ? "aspect-[9/16]" : "aspect-video"} w-full object-cover`} />{item.selected && <span className="absolute end-1 top-1 grid size-5 place-items-center rounded-full bg-emerald-500 text-white"><Check size={12} /></span>}</button>)}</div>;
+    if (!items.length)
+      return (
+        <p className="mt-3 text-xs text-slate-400">
+          {ar
+            ? "لا توجد ثامبنيلات محفوظة بهذا المقاس بعد."
+            : "No saved thumbnails in this format yet."}
+        </p>
+      );
+    return (
+      <div
+        className={`mt-3 grid gap-2 ${compact ? (kind === "short" ? "grid-cols-4" : "grid-cols-3") : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4"}`}
+      >
+        {items.map((item) => (
+          <button
+            type="button"
+            key={item.id}
+            onClick={() => chooseSavedThumbnail(item)}
+            className={`group relative overflow-hidden rounded-xl border-2 bg-slate-100 ${item.selected ? "border-emerald-500 ring-2 ring-emerald-100" : "border-transparent hover:border-slate-300"}`}
+          >
+            <img
+              src={item.url}
+              alt="Saved thumbnail"
+              className={`${kind === "short" ? "aspect-[9/16]" : "aspect-video"} w-full object-cover`}
+            />
+            {item.selected && (
+              <span className="absolute end-1 top-1 grid size-5 place-items-center rounded-full bg-emerald-500 text-white">
+                <Check size={12} />
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+    );
   };
   const uploadRecordingThumbnail = async (streamId: string, file?: File) => {
     if (!file) return;
     try {
       const result = await api.uploadRecordingThumbnail(streamId, file);
-      setStreams((current) => current.map((stream) => stream.id === streamId ? { ...stream, thumbnail_url: result.url } : stream));
-      if (detailed?.id === streamId) setDetailed({ ...detailed, thumbnail_url: result.url });
-      setMessage(ar ? "تم حفظ غلاف البث وربطه بالأرشيف." : "VOD cover saved to the archive.");
-    } catch (e) { setMessage(e instanceof Error ? e.message : "Upload failed"); }
+      setStreams((current) =>
+        current.map((stream) =>
+          stream.id === streamId
+            ? { ...stream, thumbnail_url: result.url }
+            : stream,
+        ),
+      );
+      if (detailed?.id === streamId)
+        setDetailed({ ...detailed, thumbnail_url: result.url });
+      setMessage(
+        ar
+          ? "تم حفظ غلاف البث وربطه بالأرشيف."
+          : "VOD cover saved to the archive.",
+      );
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Upload failed");
+    }
   };
   const uploadShortThumbnail = async (clipId: string, file?: File) => {
     if (!file) return;
     try {
       const result = await api.uploadClipThumbnail(clipId, file);
-      setArchiveShorts((current) => current.map((clip) => clip.id === clipId ? { ...clip, thumbnail_url: result.url } : clip));
-      if (detailed) setDetailed({ ...detailed, clips: detailed.clips?.map((clip) => clip.id === clipId ? { ...clip, thumbnail_url: result.url } : clip) });
-      setMessage(ar ? "تم حفظ غلاف الشورت وربطه بالمكتبة." : "Short cover saved to the library.");
-    } catch (e) { setMessage(e instanceof Error ? e.message : "Upload failed"); }
+      setArchiveShorts((current) =>
+        current.map((clip) =>
+          clip.id === clipId ? { ...clip, thumbnail_url: result.url } : clip,
+        ),
+      );
+      if (detailed)
+        setDetailed({
+          ...detailed,
+          clips: detailed.clips?.map((clip) =>
+            clip.id === clipId ? { ...clip, thumbnail_url: result.url } : clip,
+          ),
+        });
+      setMessage(
+        ar
+          ? "تم حفظ غلاف الشورت وربطه بالمكتبة."
+          : "Short cover saved to the library.",
+      );
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Upload failed");
+    }
   };
 
   const picker = (
@@ -660,8 +805,24 @@ export default function Dashboard() {
         {options && (
           <div className="mt-4 grid gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:grid-cols-2">
             <label className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 lg:col-span-2">
-              <input type="checkbox" checked={removeMusic} onChange={(e) => setRemoveMusic(e.target.checked)} className="mt-1 size-5 accent-emerald-500" />
-              <span><span className="block font-black">{ar ? "إزالة الأغاني وموسيقى الدونيشن تلقائياً (DMCA Safe)" : "Remove donation songs & music automatically (DMCA Safe)"}</span><span className="mt-1 block text-xs leading-5 text-slate-600">{ar ? "تُعزل الموسيقى الخلفية وأغاني الدونيشن مع الحفاظ على صوت الستريمر واضحًا." : "Background music and donation songs are stripped while the streamer voice stays clear."}</span></span>
+              <input
+                type="checkbox"
+                checked={removeMusic}
+                onChange={(e) => setRemoveMusic(e.target.checked)}
+                className="mt-1 size-5 accent-emerald-500"
+              />
+              <span>
+                <span className="block font-black">
+                  {ar
+                    ? "إزالة الأغاني وموسيقى الدونيشن تلقائياً (DMCA Safe)"
+                    : "Remove donation songs & music automatically (DMCA Safe)"}
+                </span>
+                <span className="mt-1 block text-xs leading-5 text-slate-600">
+                  {ar
+                    ? "تُعزل الموسيقى الخلفية وأغاني الدونيشن مع الحفاظ على صوت الستريمر واضحًا."
+                    : "Background music and donation songs are stripped while the streamer voice stays clear."}
+                </span>
+              </span>
             </label>
             <article className="flex flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="flex items-start gap-4">
@@ -730,7 +891,14 @@ export default function Dashboard() {
                   </button>
                 )}
               </div>
-              <div className="mt-4 border-t border-slate-100 pt-3"><p className="text-xs font-black text-slate-600">{ar ? "اختر ثامبنيل محفوظة للبث" : "Choose a saved VOD thumbnail"}</p>{thumbnailChoices("vod", true)}</div>
+              <div className="mt-4 border-t border-slate-100 pt-3">
+                <p className="text-xs font-black text-slate-600">
+                  {ar
+                    ? "اختر ثامبنيل محفوظة للبث"
+                    : "Choose a saved VOD thumbnail"}
+                </p>
+                {thumbnailChoices("vod", true)}
+              </div>
             </article>
             <article className="flex flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="flex items-start gap-4">
@@ -900,126 +1068,236 @@ export default function Dashboard() {
         </div>
       </div>
       <div className="mb-5 inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
-        {(["vod", "short"] as const).map((value) => <button key={value} onClick={() => setArchiveKind(value)} className={`rounded-lg px-4 py-2 text-sm font-black ${archiveKind === value ? "bg-emerald-500 text-white" : "text-slate-500"}`}>{value === "vod" ? (ar ? "البثوث" : "VODs") : (ar ? `الشورتات (${archiveShorts.length})` : `Shorts (${archiveShorts.length})`)}</button>)}
+        {(["vod", "short"] as const).map((value) => (
+          <button
+            key={value}
+            onClick={() => setArchiveKind(value)}
+            className={`rounded-lg px-4 py-2 text-sm font-black ${archiveKind === value ? "bg-emerald-500 text-white" : "text-slate-500"}`}
+          >
+            {value === "vod"
+              ? ar
+                ? "البثوث"
+                : "VODs"
+              : ar
+                ? `الشورتات (${archiveShorts.length})`
+                : `Shorts (${archiveShorts.length})`}
+          </button>
+        ))}
       </div>
-      {archiveKind === "vod" && (visibleArchive.length ? (
-        <div className="grid gap-5 md:grid-cols-2 2xl:grid-cols-3">
-          {visibleArchive.map((stream) => (
-            <article
-              key={stream.id}
-              className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
-            >
-              <div className="aspect-video bg-gradient-to-br from-slate-100 to-emerald-50">
-                {stream.thumbnail_url ? (
+      {archiveKind === "vod" &&
+        (visibleArchive.length ? (
+          <div className="grid gap-5 md:grid-cols-2 2xl:grid-cols-3">
+            {visibleArchive.map((stream) => (
+              <article
+                key={stream.id}
+                className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+              >
+                <div className="aspect-video bg-gradient-to-br from-slate-100 to-emerald-50">
+                  {stream.thumbnail_url ? (
+                    <img
+                      src={stream.thumbnail_url}
+                      alt="VOD thumbnail"
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="grid h-full place-items-center text-sm font-bold text-slate-400">
+                      <Film className="mb-2" />{" "}
+                      {ar ? "صورة البث المصغّرة" : "Branded VOD thumbnail"}
+                    </div>
+                  )}
+                </div>
+                <div className="p-5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`rounded-full px-2 py-1 text-xs font-black ${platformClass(stream.platform)}`}
+                      >
+                        {stream.platform.toUpperCase()}
+                      </span>
+                      {stream.remove_music && (
+                        <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-black text-emerald-700">
+                          DMCA Safe • {ar ? "بدون موسيقى" : "No music"}
+                        </span>
+                      )}
+                    </div>
+                    <StatusBadge status={stream.status} />
+                  </div>
+                  <h3 className="mt-3 truncate font-black">{handle(stream)}</h3>
+                  <div className="mt-2 flex gap-4 text-xs text-slate-500">
+                    <span>
+                      {stream.ended_at
+                        ? new Date(stream.ended_at).toLocaleDateString(
+                            ar ? "ar-SA" : "en-US",
+                          )
+                        : "—"}
+                    </span>
+                    <span>{durationText(stream)}</span>
+                    <span>
+                      {stream.clip_count ?? 0} {ar ? "شورت" : "Shorts"}
+                    </span>
+                  </div>
+                  <div className="mt-5 grid grid-cols-2 gap-2">
+                    {stream.master_url && (
+                      <a
+                        href={stream.master_url}
+                        download
+                        className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold"
+                      >
+                        <Download size={14} />
+                        {ar ? "تحميل البث" : "Master VOD"}
+                      </a>
+                    )}
+                    {stream.thumbnail_url && (
+                      <a
+                        href={stream.thumbnail_url}
+                        download
+                        className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold"
+                      >
+                        <Download size={14} />
+                        {ar ? "الثامبنايل" : "Thumbnail"}
+                      </a>
+                    )}
+                    <button
+                      onClick={() => {
+                        setSelected(stream.id);
+                        changeSection("shorts");
+                      }}
+                      className="inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-500 px-3 py-2 text-xs font-bold text-white"
+                    >
+                      <WandSparkles size={14} />
+                      {ar ? "صانع الشورتات" : "Shorts studio"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSelected(stream.id);
+                        setThumbPlatform(stream.platform);
+                        changeSection("thumbnail");
+                      }}
+                      className="inline-flex items-center justify-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white"
+                    >
+                      <ImageIcon size={14} />
+                      {ar ? "صانع الغلاف" : "Thumbnail studio"}
+                    </button>
+                    <label className="inline-flex cursor-pointer items-center justify-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold">
+                      <Upload size={14} />
+                      {ar ? "رفع غلاف" : "Upload cover"}
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        className="hidden"
+                        onChange={(e) =>
+                          uploadRecordingThumbnail(
+                            stream.id,
+                            e.target.files?.[0],
+                          )
+                        }
+                      />
+                    </label>
+                  </div>
+                  <button
+                    onClick={() => setDeleting(stream.id)}
+                    className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg py-2 text-xs font-bold text-rose-600 hover:bg-rose-50"
+                  >
+                    <Trash2 size={14} />
+                    {ar ? "حذف شامل ونهائي" : "Hard delete"}
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <Empty
+            text={
+              ar
+                ? "لا توجد تسجيلات تطابق البحث."
+                : "No recordings match your search."
+            }
+          />
+        ))}
+      {archiveKind === "short" &&
+        (visibleArchiveShorts.length ? (
+          <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            {visibleArchiveShorts.map((clip) => (
+              <article
+                key={clip.id}
+                className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-sm"
+              >
+                {clip.thumbnail_url ? (
                   <img
-                    src={stream.thumbnail_url}
-                    alt="VOD thumbnail"
-                    className="h-full w-full object-cover"
+                    src={clip.thumbnail_url}
+                    alt="Short thumbnail"
+                    className="aspect-[9/16] w-full rounded-xl object-cover"
                   />
                 ) : (
-                  <div className="grid h-full place-items-center text-sm font-bold text-slate-400">
-                    <Film className="mb-2" />{" "}
-                    {ar ? "صورة البث المصغّرة" : "Branded VOD thumbnail"}
-                  </div>
+                  <video
+                    controls
+                    src={clip.url || undefined}
+                    className="aspect-[9/16] w-full rounded-xl bg-slate-950 object-cover"
+                  />
                 )}
-              </div>
-              <div className="p-5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2"><span className={`rounded-full px-2 py-1 text-xs font-black ${platformClass(stream.platform)}`}>{stream.platform.toUpperCase()}</span>{stream.remove_music && <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-black text-emerald-700">DMCA Safe • {ar ? "بدون موسيقى" : "No music"}</span>}</div>
-                  <StatusBadge status={stream.status} />
-                </div>
-                <h3 className="mt-3 truncate font-black">{handle(stream)}</h3>
-                <div className="mt-2 flex gap-4 text-xs text-slate-500">
-                  <span>
-                    {stream.ended_at
-                      ? new Date(stream.ended_at).toLocaleDateString(
-                          ar ? "ar-SA" : "en-US",
-                        )
-                      : "—"}
+                <div className="mt-3 flex items-center justify-between">
+                  <span
+                    className={`rounded-full px-2 py-1 text-[10px] font-black ${platformClass(clip.platform)}`}
+                  >
+                    {clip.platform.toUpperCase()} · SHORT
                   </span>
-                  <span>{durationText(stream)}</span>
-                  <span>
-                    {stream.clip_count ?? 0} {ar ? "شورت" : "Shorts"}
+                  <span className="text-xs text-slate-500">
+                    {Math.round(clip.end_seconds - clip.start_seconds)}s
                   </span>
                 </div>
-                <div className="mt-5 grid grid-cols-2 gap-2">
-                  {stream.master_url && (
-                    <a
-                      href={stream.master_url}
-                      download
-                      className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold"
-                    >
-                      <Download size={14} />
-                      {ar ? "تحميل البث" : "Master VOD"}
-                    </a>
+                <p className="mt-2 truncate text-sm font-black">
+                  {handle({ source_url: clip.source_url } as Stream)}
+                </p>
+                <div className="mt-2 rounded-lg bg-slate-50 p-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="line-clamp-2 text-xs font-black">
+                      {clip.hook_title ||
+                        (ar ? "لقطة قوية من البث" : "Powerful stream moment")}
+                    </p>
+                    <span className="shrink-0 text-[10px] font-black text-orange-700">
+                      🔥 {clip.viral_score ?? Math.round(clip.score * 100)}%
+                    </span>
+                  </div>
+                  {clip.highlight_reason && (
+                    <p className="mt-1 text-[10px] font-bold text-emerald-700">
+                      {clip.highlight_reason}
+                    </p>
                   )}
-                  {stream.thumbnail_url && (
-                    <a
-                      href={stream.thumbnail_url}
-                      download
-                      className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold"
-                    >
-                      <Download size={14} />
-                      {ar ? "الثامبنايل" : "Thumbnail"}
-                    </a>
-                  )}
-                  <button
-                    onClick={() => {
-                      setSelected(stream.id);
-                      changeSection("shorts");
-                    }}
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <a
+                    href={clip.url || undefined}
+                    download
                     className="inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-500 px-3 py-2 text-xs font-bold text-white"
                   >
-                    <WandSparkles size={14} />
-                    {ar ? "صانع الشورتات" : "Shorts studio"}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setSelected(stream.id);
-                      setThumbPlatform(stream.platform);
-                      changeSection("thumbnail");
-                    }}
-                    className="inline-flex items-center justify-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white"
-                  >
-                    <ImageIcon size={14} />
-                    {ar ? "صانع الغلاف" : "Thumbnail studio"}
-                  </button>
+                    <Download size={14} />
+                    {ar ? "تحميل" : "Download"}
+                  </a>
                   <label className="inline-flex cursor-pointer items-center justify-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold">
-                    <Upload size={14} />{ar ? "رفع غلاف" : "Upload cover"}
-                    <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => uploadRecordingThumbnail(stream.id, e.target.files?.[0])} />
+                    <Upload size={14} />
+                    {ar ? "رفع غلاف" : "Upload cover"}
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      className="hidden"
+                      onChange={(e) =>
+                        uploadShortThumbnail(clip.id, e.target.files?.[0])
+                      }
+                    />
                   </label>
                 </div>
-                <button
-                  onClick={() => setDeleting(stream.id)}
-                  className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg py-2 text-xs font-bold text-rose-600 hover:bg-rose-50"
-                >
-                  <Trash2 size={14} />
-                  {ar ? "حذف شامل ونهائي" : "Hard delete"}
-                </button>
-              </div>
-            </article>
-          ))}
-        </div>
-      ) : (
-        <Empty
-          text={
-            ar
-              ? "لا توجد تسجيلات تطابق البحث."
-              : "No recordings match your search."
-          }
-        />
-      ))}
-      {archiveKind === "short" && (visibleArchiveShorts.length ? (
-        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-          {visibleArchiveShorts.map((clip) => <article key={clip.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-            {clip.thumbnail_url ? <img src={clip.thumbnail_url} alt="Short thumbnail" className="aspect-[9/16] w-full rounded-xl object-cover" /> : <video controls src={clip.url || undefined} className="aspect-[9/16] w-full rounded-xl bg-slate-950 object-cover" />}
-            <div className="mt-3 flex items-center justify-between"><span className={`rounded-full px-2 py-1 text-[10px] font-black ${platformClass(clip.platform)}`}>{clip.platform.toUpperCase()} · SHORT</span><span className="text-xs text-slate-500">{Math.round(clip.end_seconds - clip.start_seconds)}s</span></div>
-            <p className="mt-2 truncate text-sm font-black">{handle({ source_url: clip.source_url } as Stream)}</p>
-            <div className="mt-2 rounded-lg bg-slate-50 p-2"><div className="flex items-start justify-between gap-2"><p className="line-clamp-2 text-xs font-black">{clip.hook_title || (ar ? "لقطة قوية من البث" : "Powerful stream moment")}</p><span className="shrink-0 text-[10px] font-black text-orange-700">🔥 {clip.viral_score ?? Math.round(clip.score * 100)}%</span></div>{clip.highlight_reason && <p className="mt-1 text-[10px] font-bold text-emerald-700">{clip.highlight_reason}</p>}</div>
-            <div className="mt-3 grid grid-cols-2 gap-2"><a href={clip.url || undefined} download className="inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-500 px-3 py-2 text-xs font-bold text-white"><Download size={14} />{ar ? "تحميل" : "Download"}</a><label className="inline-flex cursor-pointer items-center justify-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold"><Upload size={14} />{ar ? "رفع غلاف" : "Upload cover"}<input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => uploadShortThumbnail(clip.id, e.target.files?.[0])} /></label></div>
-          </article>)}
-        </div>
-      ) : <Empty text={ar ? "لم تُولّد شورتات بعد. ستُحفظ هنا تلقائيًا عند اكتمال التوليد." : "No Shorts yet. Generated Shorts are saved here automatically."} />)}
+              </article>
+            ))}
+          </div>
+        ) : (
+          <Empty
+            text={
+              ar
+                ? "لم تُولّد شورتات بعد. ستُحفظ هنا تلقائيًا عند اكتمال التوليد."
+                : "No Shorts yet. Generated Shorts are saved here automatically."
+            }
+          />
+        ))}
     </>
   );
 
@@ -1070,8 +1348,24 @@ export default function Dashboard() {
             />
           </div>
           <label className="mt-4 flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-            <input type="checkbox" checked={removeMusic} onChange={(e) => setRemoveMusic(e.target.checked)} className="mt-1 size-5 accent-emerald-500" />
-            <span><span className="block text-sm font-black">{ar ? "إزالة الأغاني وموسيقى الدونيشن تلقائياً (DMCA Safe)" : "DMCA-safe vocal-only Shorts"}</span><span className="mt-1 block text-xs leading-5 text-slate-600">{ar ? "تُزال الموسيقى من الشورت مع إبقاء صوت الستريمر واضحًا." : "Strip music from each Short while retaining the streamer voice."}</span></span>
+            <input
+              type="checkbox"
+              checked={removeMusic}
+              onChange={(e) => setRemoveMusic(e.target.checked)}
+              className="mt-1 size-5 accent-emerald-500"
+            />
+            <span>
+              <span className="block text-sm font-black">
+                {ar
+                  ? "إزالة الأغاني وموسيقى الدونيشن تلقائياً (DMCA Safe)"
+                  : "DMCA-safe vocal-only Shorts"}
+              </span>
+              <span className="mt-1 block text-xs leading-5 text-slate-600">
+                {ar
+                  ? "تُزال الموسيقى من الشورت مع إبقاء صوت الستريمر واضحًا."
+                  : "Strip music from each Short while retaining the streamer voice."}
+              </span>
+            </span>
           </label>
           <label className="mt-5 block text-sm font-black">
             {ar ? "عدد المقاطع (1–10)" : "Clip count (1–10)"}
@@ -1141,7 +1435,14 @@ export default function Dashboard() {
                 </button>
               </div>
             </div>
-            <div className="mt-4 border-t border-emerald-200 pt-3"><p className="text-xs font-black text-emerald-800">{ar ? "اختر ثامبنيل طولية محفوظة" : "Choose a saved vertical thumbnail"}</p>{thumbnailChoices("short", true)}</div>
+            <div className="mt-4 border-t border-emerald-200 pt-3">
+              <p className="text-xs font-black text-emerald-800">
+                {ar
+                  ? "اختر ثامبنيل طولية محفوظة"
+                  : "Choose a saved vertical thumbnail"}
+              </p>
+              {thumbnailChoices("short", true)}
+            </div>
           </div>
           <label className="mt-5 block text-sm font-black">
             {ar ? "عنوان الغلاف" : "Cover headline"}
@@ -1196,12 +1497,37 @@ export default function Dashboard() {
                     />
                   )}
                   <div className="mt-3 flex items-center justify-between">
-                    <div className="flex items-center gap-2"><span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-black text-emerald-700">AR / EN {ar ? "ترجمة" : "CAPTIONS"}</span>{detailed?.remove_music && <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-black text-emerald-700">DMCA Safe • {ar ? "بدون موسيقى" : "No music"}</span>}</div>
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-black text-emerald-700">
+                        AR / EN {ar ? "ترجمة" : "CAPTIONS"}
+                      </span>
+                      {detailed?.remove_music && (
+                        <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-black text-emerald-700">
+                          DMCA Safe • {ar ? "بدون موسيقى" : "No music"}
+                        </span>
+                      )}
+                    </div>
                     <span className="text-xs font-bold text-slate-500">
                       {Math.round(clip.end_seconds - clip.start_seconds)}s
                     </span>
                   </div>
-                  <div className="mt-3 rounded-xl bg-slate-50 p-3"><div className="flex items-start justify-between gap-2"><h3 className="font-black leading-5">{clip.hook_title || (ar ? "لقطة قوية من البث" : "Powerful stream moment")}</h3><span className="shrink-0 rounded-full bg-orange-100 px-2 py-1 text-[10px] font-black text-orange-700">🔥 {clip.viral_score ?? Math.round(clip.score * 100)}% Viral</span></div>{clip.highlight_reason && <p className="mt-2 text-xs font-bold text-emerald-700">{clip.highlight_reason}</p>}</div>
+                  <div className="mt-3 rounded-xl bg-slate-50 p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <h3 className="font-black leading-5">
+                        {clip.hook_title ||
+                          (ar ? "لقطة قوية من البث" : "Powerful stream moment")}
+                      </h3>
+                      <span className="shrink-0 rounded-full bg-orange-100 px-2 py-1 text-[10px] font-black text-orange-700">
+                        🔥 {clip.viral_score ?? Math.round(clip.score * 100)}%
+                        Viral
+                      </span>
+                    </div>
+                    {clip.highlight_reason && (
+                      <p className="mt-2 text-xs font-bold text-emerald-700">
+                        {clip.highlight_reason}
+                      </p>
+                    )}
+                  </div>
                   <div className="mt-3 grid gap-2">
                     {clip.url && (
                       <a
@@ -1378,10 +1704,78 @@ export default function Dashboard() {
   );
 
   function SavedThumbnailLibrary() {
-    return <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex items-center justify-between"><div><h2 className="text-lg font-black">{ar ? "مكتبة الثامبنيلات المحفوظة" : "Saved thumbnail library"}</h2><p className="mt-1 text-xs text-slate-500">{ar ? "اختر أي تصميم ليصبح الغلاف الافتراضي، أو احذف التصاميم التي لم تعد تحتاجها." : "Select a design as the default, or remove designs you no longer need."}</p></div><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-500">{savedThumbnails.filter((item) => item.kind === thumbFormat).length}</span></div>
-      {savedThumbnails.some((item) => item.kind === thumbFormat) ? <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">{savedThumbnails.filter((item) => item.kind === thumbFormat).map((item) => <article key={item.id} className={`overflow-hidden rounded-xl border-2 p-2 ${item.selected ? "border-emerald-500 bg-emerald-50" : "border-slate-200"}`}><button type="button" onClick={() => chooseSavedThumbnail(item)} className="relative block w-full overflow-hidden rounded-lg bg-slate-100"><img src={item.url} alt="Saved thumbnail" className={`${item.kind === "short" ? "aspect-[9/16]" : "aspect-video"} w-full object-cover`} />{item.selected && <span className="absolute end-2 top-2 rounded-full bg-emerald-500 px-2 py-1 text-[10px] font-black text-white">{ar ? "مختارة" : "Selected"}</span>}</button><div className="mt-2 flex items-center justify-between"><button type="button" onClick={() => chooseSavedThumbnail(item)} className="text-xs font-black text-emerald-700">{ar ? "اختيار" : "Select"}</button><button type="button" onClick={() => removeSavedThumbnail(item)} className="text-xs font-black text-rose-600">{ar ? "حذف" : "Delete"}</button></div></article>)}</div> : <Empty text={ar ? "صمّم واحفظ أول ثامبنيل لتظهر هنا." : "Create and save your first thumbnail to see it here."} />}
-    </section>;
+    return (
+      <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-black">
+              {ar ? "مكتبة الثامبنيلات المحفوظة" : "Saved thumbnail library"}
+            </h2>
+            <p className="mt-1 text-xs text-slate-500">
+              {ar
+                ? "اختر أي تصميم ليصبح الغلاف الافتراضي، أو احذف التصاميم التي لم تعد تحتاجها."
+                : "Select a design as the default, or remove designs you no longer need."}
+            </p>
+          </div>
+          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-500">
+            {savedThumbnails.filter((item) => item.kind === thumbFormat).length}
+          </span>
+        </div>
+        {savedThumbnails.some((item) => item.kind === thumbFormat) ? (
+          <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            {savedThumbnails
+              .filter((item) => item.kind === thumbFormat)
+              .map((item) => (
+                <article
+                  key={item.id}
+                  className={`overflow-hidden rounded-xl border-2 p-2 ${item.selected ? "border-emerald-500 bg-emerald-50" : "border-slate-200"}`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => chooseSavedThumbnail(item)}
+                    className="relative block w-full overflow-hidden rounded-lg bg-slate-100"
+                  >
+                    <img
+                      src={item.url}
+                      alt="Saved thumbnail"
+                      className={`${item.kind === "short" ? "aspect-[9/16]" : "aspect-video"} w-full object-cover`}
+                    />
+                    {item.selected && (
+                      <span className="absolute end-2 top-2 rounded-full bg-emerald-500 px-2 py-1 text-[10px] font-black text-white">
+                        {ar ? "مختارة" : "Selected"}
+                      </span>
+                    )}
+                  </button>
+                  <div className="mt-2 flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={() => chooseSavedThumbnail(item)}
+                      className="text-xs font-black text-emerald-700"
+                    >
+                      {ar ? "اختيار" : "Select"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeSavedThumbnail(item)}
+                      className="text-xs font-black text-rose-600"
+                    >
+                      {ar ? "حذف" : "Delete"}
+                    </button>
+                  </div>
+                </article>
+              ))}
+          </div>
+        ) : (
+          <Empty
+            text={
+              ar
+                ? "صمّم واحفظ أول ثامبنيل لتظهر هنا."
+                : "Create and save your first thumbnail to see it here."
+            }
+          />
+        )}
+      </section>
+    );
   }
   const logo = logoPreview || branding.archive_logo_url;
   const brandingView = (
@@ -1601,6 +1995,172 @@ export default function Dashboard() {
     </>
   );
 
+  const reviewSuggestion = async (item: CreatorSuggestion) => {
+    try {
+      const next = await api.updateCreatorSuggestion(
+        item.id,
+        item.status === "new" ? "reviewed" : "new",
+      );
+      setSuggestions((current) =>
+        current.map((value) => (value.id === item.id ? next : value)),
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : ar
+            ? "تعذّر تحديث الاقتراح"
+            : "Could not update suggestion",
+      );
+    }
+  };
+  const removeSuggestion = async (id: string) => {
+    try {
+      await api.deleteCreatorSuggestion(id);
+      setSuggestions((current) => current.filter((item) => item.id !== id));
+      setMessage(ar ? "تم حذف الاقتراح." : "Suggestion deleted.");
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : ar
+            ? "تعذّر حذف الاقتراح"
+            : "Could not delete suggestion",
+      );
+    }
+  };
+  const newSuggestionCount = suggestions.filter(
+    (item) => item.status === "new",
+  ).length;
+  const suggestionsView = (
+    <>
+      <SectionTitle
+        eyebrow={ar ? "صوت المجتمع" : "Community inbox"}
+        title={ar ? "اقتراحات المشاهير" : "Creator suggestions"}
+        description={
+          ar
+            ? "كل الأسماء التي يقترحها زوار Klipr تصل إلى هنا. راجع القناة والمنصة ثم حدّث حالة الاقتراح."
+            : "Every creator submitted by Klipr visitors arrives here. Review the channel and platform, then update its status."
+        }
+        icon={MessageSquareText}
+      />
+      <div className="mb-6 grid gap-3 sm:grid-cols-2">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+          <p className="text-xs font-black uppercase tracking-[.16em] text-slate-400">
+            {ar ? "إجمالي الاقتراحات" : "Total suggestions"}
+          </p>
+          <p className="mt-2 text-3xl font-black text-slate-900">
+            {suggestions.length}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+          <p className="text-xs font-black uppercase tracking-[.16em] text-emerald-600">
+            {ar ? "بانتظار المراجعة" : "Awaiting review"}
+          </p>
+          <p className="mt-2 text-3xl font-black text-emerald-800">
+            {newSuggestionCount}
+          </p>
+        </div>
+      </div>
+      {suggestionsBusy ? (
+        <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm font-bold text-slate-400">
+          {ar ? "جارٍ تحميل الاقتراحات..." : "Loading suggestions..."}
+        </div>
+      ) : suggestions.length === 0 ? (
+        <Empty
+          text={
+            ar
+              ? "لا توجد اقتراحات حتى الآن. ستظهر اقتراحات زوار الموقع هنا مباشرة."
+              : "No suggestions yet. Visitor submissions will appear here automatically."
+          }
+        />
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {suggestions.map((item) => (
+            <article
+              key={item.id}
+              className={`rounded-2xl border bg-white p-5 shadow-sm transition ${item.status === "new" ? "border-emerald-200 ring-1 ring-emerald-100" : "border-slate-200"}`}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="truncate text-lg font-black text-slate-900">
+                      {item.creator_name}
+                    </h3>
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${item.platform === "twitch" ? "bg-violet-100 text-violet-700" : "bg-emerald-100 text-emerald-700"}`}
+                    >
+                      {item.platform}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-400">
+                    {new Intl.DateTimeFormat(ar ? "ar-SA" : "en-US", {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    }).format(new Date(item.created_at))}
+                  </p>
+                </div>
+                <span
+                  className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black ${item.status === "new" ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}
+                >
+                  {item.status === "new"
+                    ? ar
+                      ? "جديد"
+                      : "New"
+                    : ar
+                      ? "تمت المراجعة"
+                      : "Reviewed"}
+                </span>
+              </div>
+              {item.channel_url ? (
+                <a
+                  href={item.channel_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-4 flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-bold text-slate-600 transition hover:border-emerald-300 hover:text-emerald-700"
+                >
+                  <span className="truncate" dir="ltr">
+                    {item.channel_url}
+                  </span>
+                  <ExternalLink size={15} className="shrink-0" />
+                </a>
+              ) : (
+                <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-xs text-slate-400">
+                  {ar
+                    ? "لم يُرفق رابط للقناة."
+                    : "No channel URL was provided."}
+                </p>
+              )}
+              <div className="mt-4 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => removeSuggestion(item.id)}
+                  className="rounded-lg px-3 py-2 text-xs font-black text-rose-600 transition hover:bg-rose-50"
+                >
+                  {ar ? "حذف" : "Delete"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => reviewSuggestion(item)}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-black transition ${item.status === "new" ? "bg-emerald-600 text-white hover:bg-emerald-700" : "border border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+                >
+                  <CheckCircle2 size={15} />
+                  {item.status === "new"
+                    ? ar
+                      ? "تحديد كمُراجع"
+                      : "Mark reviewed"
+                    : ar
+                      ? "إعادة إلى جديد"
+                      : "Mark as new"}
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </>
+  );
+
   const content =
     section === "live"
       ? liveView
@@ -1610,7 +2170,9 @@ export default function Dashboard() {
           ? shortsView
           : section === "thumbnail"
             ? thumbnailView
-            : brandingView;
+            : section === "branding"
+              ? brandingView
+              : suggestionsView;
   return (
     <Shell
       activeCount={active.length}

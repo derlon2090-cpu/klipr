@@ -72,16 +72,44 @@ export type SavedThumbnail = {
   selected: boolean;
 };
 export type WatchlistSubscription = {
-  id: string; platform: "twitch" | "kick"; channel_slug: string; channel_url: string;
-  display_name: string; avatar_url: string | null; auto_record: boolean;
-  delay_seconds: number; is_currently_live: boolean; created_at: string;
+  id: string;
+  platform: "twitch" | "kick";
+  channel_slug: string;
+  channel_url: string;
+  display_name: string;
+  avatar_url: string | null;
+  auto_record: boolean;
+  delay_seconds: number;
+  is_currently_live: boolean;
+  created_at: string;
 };
 export type NotificationItem = {
-  id: string; subscription_id: string | null; title: string; message: string;
-  channel_url: string; status: "pending_auto_record" | "auto_started" | "cancelled" | "manual_taken_over";
-  is_read: boolean; scheduled_for: string | null; created_at: string;
+  id: string;
+  subscription_id: string | null;
+  title: string;
+  message: string;
+  channel_url: string;
+  status:
+    | "pending_auto_record"
+    | "auto_started"
+    | "cancelled"
+    | "manual_taken_over";
+  is_read: boolean;
+  scheduled_for: string | null;
+  created_at: string;
 };
-export type NotificationsResponse = { unread_count: number; items: NotificationItem[] };
+export type NotificationsResponse = {
+  unread_count: number;
+  items: NotificationItem[];
+};
+export type CreatorSuggestion = {
+  id: string;
+  creator_name: string;
+  platform: "twitch" | "kick";
+  channel_url: string | null;
+  status: "new" | "reviewed";
+  created_at: string;
+};
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API}${path}`, {
@@ -129,13 +157,51 @@ export const api = {
     }),
   me: () => request<{ email: string }>("/auth/me"),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
+  suggestCreator: (payload: {
+    creator_name: string;
+    platform: "twitch" | "kick";
+    channel_url?: string;
+  }) =>
+    request<CreatorSuggestion>("/creator-suggestions", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  creatorSuggestions: () =>
+    request<CreatorSuggestion[]>("/creator-suggestions"),
+  updateCreatorSuggestion: (id: string, status: "new" | "reviewed") =>
+    request<CreatorSuggestion>(`/creator-suggestions/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
+  deleteCreatorSuggestion: (id: string) =>
+    request<void>(`/creator-suggestions/${id}`, { method: "DELETE" }),
   watchlist: () => request<WatchlistSubscription[]>("/watchlist"),
-  subscribeCreator: (channel_url: string) => request<WatchlistSubscription>("/watchlist", { method: "POST", body: JSON.stringify({ channel_url, auto_record: true, delay_seconds: 30 }) }),
-  updateSubscription: (id: string, patch: { auto_record?: boolean; delay_seconds?: number }) => request<WatchlistSubscription>(`/watchlist/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
-  unsubscribeCreator: (id: string) => request<void>(`/watchlist/${id}`, { method: "DELETE" }),
+  subscribeCreator: (channel_url: string) =>
+    request<WatchlistSubscription>("/watchlist", {
+      method: "POST",
+      body: JSON.stringify({
+        channel_url,
+        auto_record: true,
+        delay_seconds: 30,
+      }),
+    }),
+  updateSubscription: (
+    id: string,
+    patch: { auto_record?: boolean; delay_seconds?: number },
+  ) =>
+    request<WatchlistSubscription>(`/watchlist/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  unsubscribeCreator: (id: string) =>
+    request<void>(`/watchlist/${id}`, { method: "DELETE" }),
   notifications: () => request<NotificationsResponse>("/notifications"),
-  readAllNotifications: () => request<void>("/notifications/read-all", { method: "POST" }),
-  cancelAutoRecord: (id: string) => request<NotificationItem>(`/notifications/${id}/cancel`, { method: "POST" }),
+  readAllNotifications: () =>
+    request<void>("/notifications/read-all", { method: "POST" }),
+  cancelAutoRecord: (id: string) =>
+    request<NotificationItem>(`/notifications/${id}/cancel`, {
+      method: "POST",
+    }),
   streams: () => request<Stream[]>("/streams"),
   archiveShorts: () => request<ArchiveShort[]>("/archive/shorts"),
   stream: (id: string) => request<Stream>(`/streams/${id}`),
@@ -175,8 +241,12 @@ export const api = {
     request<void>(`/recordings/${id}`, { method: "DELETE" }),
   branding: () => request<Branding>("/branding"),
   savedThumbnails: () => request<SavedThumbnail[]>("/branding/thumbnails"),
-  selectThumbnail: (id: string) => request<SavedThumbnail>(`/branding/thumbnails/${id}/select`, { method: "POST" }),
-  deleteSavedThumbnail: (id: string) => request<void>(`/branding/thumbnails/${id}`, { method: "DELETE" }),
+  selectThumbnail: (id: string) =>
+    request<SavedThumbnail>(`/branding/thumbnails/${id}/select`, {
+      method: "POST",
+    }),
+  deleteSavedThumbnail: (id: string) =>
+    request<void>(`/branding/thumbnails/${id}`, { method: "DELETE" }),
   saveBranding: (
     branding: Omit<
       Branding,
@@ -215,11 +285,16 @@ export const api = {
   deleteThumbnail: (kind: "vod" | "short") =>
     request<void>(`/branding/thumbnail?kind=${kind}`, { method: "DELETE" }),
   uploadRecordingThumbnail: (id: string, file: File) => {
-    const body = new FormData(); body.append("file", file);
-    return upload<{ key: string; url: string }>(`/recordings/${id}/thumbnail`, body);
+    const body = new FormData();
+    body.append("file", file);
+    return upload<{ key: string; url: string }>(
+      `/recordings/${id}/thumbnail`,
+      body,
+    );
   },
   uploadClipThumbnail: (id: string, file: File) => {
-    const body = new FormData(); body.append("file", file);
+    const body = new FormData();
+    body.append("file", file);
     return upload<{ key: string; url: string }>(`/clips/${id}/thumbnail`, body);
   },
 };
