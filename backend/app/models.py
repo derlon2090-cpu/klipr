@@ -57,6 +57,34 @@ class SavedThumbnail(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class WatchlistSubscription(Base):
+    __tablename__ = "watchlist_subscriptions"
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    platform: Mapped[str] = mapped_column(String(16), index=True)
+    channel_slug: Mapped[str] = mapped_column(String(100))
+    channel_url: Mapped[str] = mapped_column(Text, unique=True)
+    display_name: Mapped[str] = mapped_column(String(120))
+    avatar_url: Mapped[str | None] = mapped_column(Text)
+    auto_record: Mapped[bool] = mapped_column(Boolean, default=True)
+    delay_seconds: Mapped[int] = mapped_column(default=30)
+    is_currently_live: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_stream_id: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    subscription_id: Mapped[UUID | None] = mapped_column(ForeignKey("watchlist_subscriptions.id", ondelete="SET NULL"), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    message: Mapped[str] = mapped_column(Text)
+    channel_url: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False)
+    scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Stream(Base):
     __tablename__ = "streams"
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)

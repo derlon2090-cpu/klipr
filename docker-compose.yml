@@ -50,6 +50,19 @@ services:
       timeout: 10s
       start_period: 30s
       retries: 3
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    env_file: .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://klipr:change-me@postgres:5432/klipr}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    command: celery -A app.worker.celery_app beat --loglevel=INFO
+    volumes: [worker_media:/var/lib/klipr]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
   frontend:
     build:
       context: ./frontend

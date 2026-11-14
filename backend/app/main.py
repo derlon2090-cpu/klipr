@@ -15,12 +15,12 @@ from pydantic import BaseModel
 from sqlalchemy import func, text
 from app.db import SessionLocal
 from app.config import get_settings
-from app.models import ArchiveBranding, Clip, SavedThumbnail, Stream, StreamStatus
+from app.models import ArchiveBranding, Clip, Notification, SavedThumbnail, Stream, StreamStatus, WatchlistSubscription
 from app.storage import copy_file, delete_files, presigned_download_url, upload_file
 from app.worker.tasks import WORK_ROOT, active_key, record_stream, redis_client, stop_key, task_key
 
 app = FastAPI(title="Klipr.cloud API", description="On-demand creator stream capture and AI clip studio.", version="0.3.0")
-app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in get_settings().klipr_cors_origins.split(",") if origin.strip()], allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["Content-Type"], allow_credentials=True)
+app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in get_settings().klipr_cors_origins.split(",") if origin.strip()], allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"], allow_headers=["Content-Type"], allow_credentials=True)
 
 
 @app.middleware("http")
@@ -124,6 +124,13 @@ class BrandingRequest(BaseModel):
     archive_tagline: str | None = None
     default_left_vod_id: UUID | None = None
     default_right_vod_id: UUID | None = None
+class WatchlistRequest(BaseModel):
+    channel_url: str
+    auto_record: bool = True
+    delay_seconds: int = 30
+class WatchlistPatch(BaseModel):
+    auto_record: bool | None = None
+    delay_seconds: int | None = None
 class PasswordRequest(BaseModel): password: str
 class EmailRequest(BaseModel): email: str
 
@@ -180,7 +187,7 @@ def preview_stream(platform: str, normalized_url: str) -> dict:
             livestream = data.get("livestream") or {}
             return {"platform": platform, "streamer_name": data.get("user", {}).get("username") or data.get("slug") or handle,
                     "title": livestream.get("session_title") or data.get("stream_title") or "", "live": bool(livestream),
-                    "thumbnail_url": livestream.get("thumbnail") or data.get("profile_pic")}
+                    "thumbnail_url": livestream.get("thumbnail") or data.get("profile_pic"), "stream_id": str(livestream.get("id")) if livestream.get("id") else None}
         request = UrlRequest(normalized_url, headers={"User-Agent": "Mozilla/5.0 (compatible; Klipr.cloud preview/1.0)"})
         with safe_urlopen(request) as response:
             page = response.read(1_000_000).decode("utf-8", "replace")
@@ -188,7 +195,8 @@ def preview_stream(platform: str, normalized_url: str) -> dict:
         image = _meta_tag(page, "og:image")
         # Twitch exposes this marker on live channel pages; absent is conservatively offline.
         live = 'isLiveBroadcast' in page or '"isLive":true' in page
-        return {"platform": platform, "streamer_name": title.split(" - ")[0][:100], "title": title, "live": live, "thumbnail_url": image}
+        marker = hashlib.sha256(f"{title}|{image or ''}".encode()).hexdigest()[:32] if live else None
+        return {"platform": platform, "streamer_name": title.split(" - ")[0][:100], "title": title, "live": live, "thumbnail_url": image, "stream_id": marker}
     except Exception as error:
         raise HTTPException(502, "Could not retrieve live stream metadata") from error
 
@@ -216,6 +224,13 @@ def _ensure_preset_schema(db):
         db.execute(text("ALTER TABLE streams ADD COLUMN IF NOT EXISTS remove_music BOOLEAN NOT NULL DEFAULT FALSE"))
         db.execute(text("CREATE TABLE IF NOT EXISTS saved_thumbnails (id UUID PRIMARY KEY, kind VARCHAR(16) NOT NULL, storage_key TEXT NOT NULL UNIQUE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), CONSTRAINT saved_thumbnails_kind_check CHECK (kind IN ('vod', 'short')))"))
         db.execute(text("CREATE INDEX IF NOT EXISTS ix_saved_thumbnails_kind ON saved_thumbnails(kind)"))
+        db.commit()
+
+def _ensure_watchlist_schema(db):
+    if db.bind.dialect.name == "postgresql":
+        db.execute(text("CREATE TABLE IF NOT EXISTS watchlist_subscriptions (id UUID PRIMARY KEY, platform VARCHAR(16) NOT NULL, channel_slug VARCHAR(100) NOT NULL, channel_url TEXT NOT NULL UNIQUE, display_name VARCHAR(120) NOT NULL, avatar_url TEXT, auto_record BOOLEAN NOT NULL DEFAULT TRUE, delay_seconds INTEGER NOT NULL DEFAULT 30, is_currently_live BOOLEAN NOT NULL DEFAULT FALSE, last_stream_id VARCHAR(255), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), CONSTRAINT watchlist_platform_check CHECK (platform IN ('twitch','kick')), CONSTRAINT watchlist_delay_check CHECK (delay_seconds BETWEEN 10 AND 300))"))
+        db.execute(text("CREATE TABLE IF NOT EXISTS notifications (id UUID PRIMARY KEY, subscription_id UUID REFERENCES watchlist_subscriptions(id) ON DELETE SET NULL, title VARCHAR(200) NOT NULL, message TEXT NOT NULL, channel_url TEXT NOT NULL, status VARCHAR(32) NOT NULL, is_read BOOLEAN NOT NULL DEFAULT FALSE, scheduled_for TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), CONSTRAINT notification_status_check CHECK (status IN ('pending_auto_record','auto_started','cancelled','manual_taken_over')))"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS ix_notifications_created_at ON notifications(created_at DESC)"))
         db.commit()
 def _branding(db):
     _ensure_preset_schema(db)
@@ -469,6 +484,68 @@ def record(payload: RecordRequest, request: Request):
 def stream_preview(payload: PreviewRequest):
     platform, normalized = normalize_live_url(payload.stream_url)
     return preview_stream(platform, normalized)
+
+def _watchlist_data(item: WatchlistSubscription) -> dict:
+    return {"id":str(item.id),"platform":item.platform,"channel_slug":item.channel_slug,"channel_url":item.channel_url,"display_name":item.display_name,"avatar_url":item.avatar_url,"auto_record":item.auto_record,"delay_seconds":item.delay_seconds,"is_currently_live":item.is_currently_live,"created_at":item.created_at}
+
+def _notification_data(item: Notification) -> dict:
+    return {"id":str(item.id),"subscription_id":str(item.subscription_id) if item.subscription_id else None,"title":item.title,"message":item.message,"channel_url":item.channel_url,"status":item.status,"is_read":item.is_read,"scheduled_for":item.scheduled_for,"created_at":item.created_at}
+
+@app.get("/watchlist")
+def list_watchlist():
+    with SessionLocal() as db:
+        _ensure_watchlist_schema(db)
+        return [_watchlist_data(item) for item in db.query(WatchlistSubscription).order_by(WatchlistSubscription.created_at.desc()).all()]
+
+@app.post("/watchlist", status_code=201)
+def add_watchlist(payload: WatchlistRequest):
+    if not 10 <= payload.delay_seconds <= 300: raise HTTPException(422, "delay_seconds must be between 10 and 300")
+    platform, normalized = normalize_live_url(payload.channel_url)
+    metadata = preview_stream(platform, normalized)
+    slug = urlparse(normalized).path.strip("/").split("/", 1)[0]
+    with SessionLocal() as db:
+        _ensure_watchlist_schema(db)
+        if db.query(WatchlistSubscription).filter(WatchlistSubscription.channel_url == normalized).first(): raise HTTPException(409, "Creator is already subscribed")
+        item = WatchlistSubscription(platform=platform, channel_slug=slug, channel_url=normalized, display_name=metadata.get("streamer_name") or slug, avatar_url=metadata.get("thumbnail_url"), auto_record=payload.auto_record, delay_seconds=payload.delay_seconds, is_currently_live=False, last_stream_id=None)
+        db.add(item); db.commit(); db.refresh(item)
+        return _watchlist_data(item)
+
+@app.patch("/watchlist/{subscription_id}")
+def update_watchlist(subscription_id: UUID, payload: WatchlistPatch):
+    if payload.delay_seconds is not None and not 10 <= payload.delay_seconds <= 300: raise HTTPException(422, "delay_seconds must be between 10 and 300")
+    with SessionLocal() as db:
+        _ensure_watchlist_schema(db); item = db.get(WatchlistSubscription, subscription_id)
+        if item is None: raise HTTPException(404, "Subscription not found")
+        if payload.auto_record is not None: item.auto_record = payload.auto_record
+        if payload.delay_seconds is not None: item.delay_seconds = payload.delay_seconds
+        db.commit(); db.refresh(item); return _watchlist_data(item)
+
+@app.delete("/watchlist/{subscription_id}", status_code=204)
+def delete_watchlist(subscription_id: UUID):
+    with SessionLocal() as db:
+        _ensure_watchlist_schema(db); item = db.get(WatchlistSubscription, subscription_id)
+        if item is None: raise HTTPException(404, "Subscription not found")
+        db.delete(item); db.commit()
+
+@app.get("/notifications")
+def list_notifications():
+    with SessionLocal() as db:
+        _ensure_watchlist_schema(db)
+        items = db.query(Notification).order_by(Notification.created_at.desc()).limit(50).all()
+        return {"unread_count":db.query(Notification).filter(Notification.is_read.is_(False)).count(),"items":[_notification_data(item) for item in items]}
+
+@app.post("/notifications/read-all", status_code=204)
+def read_all_notifications():
+    with SessionLocal() as db:
+        _ensure_watchlist_schema(db); db.query(Notification).filter(Notification.is_read.is_(False)).update({"is_read":True}); db.commit()
+
+@app.post("/notifications/{notification_id}/cancel")
+def cancel_notification(notification_id: UUID):
+    with SessionLocal() as db:
+        _ensure_watchlist_schema(db); item = db.get(Notification, notification_id)
+        if item is None: raise HTTPException(404, "Notification not found")
+        if item.status != "pending_auto_record": raise HTTPException(409, "Auto-record is no longer pending")
+        item.status = "cancelled"; item.is_read = True; db.commit(); db.refresh(item); return _notification_data(item)
 
 @app.get("/streams")
 def list_streams():
