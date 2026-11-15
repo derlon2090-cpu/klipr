@@ -2,7 +2,31 @@ import Link from "next/link";
 
 type LogoProps = { href?: string; compact?: boolean; className?: string };
 
+function KliprMark() {
+  return (
+    <svg aria-hidden="true" className="size-12 shrink-0 overflow-visible" viewBox="0 0 112 112" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="klipr-green" x1="18" y1="8" x2="77" y2="108" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#0ABF69" />
+          <stop offset="1" stopColor="#02A856" />
+        </linearGradient>
+      </defs>
+      <path fill="url(#klipr-green)" d="M23 8h25c7.2 0 13 5.8 13 13v19.8L84.5 13c4.9-5.8 13.6-6.5 19.2-1.4 5.5 5 5.8 13.5.8 19L78 56l27 27.3c5.2 5.3 5 13.9-.5 18.9-5.6 5.1-14.3 4.5-19.2-1.3L61 72.2V91c0 7.2-5.8 13-13 13H23c-8.3 0-15-6.7-15-15V23C8 14.7 14.7 8 23 8Z" />
+      <path fill="#029F50" fillOpacity=".34" d="M8 69.5V89c0 8.3 6.7 15 15 15h25c7.2 0 13-5.8 13-13V72.2l24.3 28.7c4.9 5.8 13.6 6.4 19.2 1.3L76.9 74.3C57.8 91.6 31.2 89.9 8 69.5Z" />
+      <path fill="white" d="M27 36.1c0-4.7 5.2-7.5 9.1-4.9l31 20.4a5.3 5.3 0 0 1 0 8.8l-31 20.4C32.2 83.4 27 80.6 27 75.9V36.1Z" />
+    </svg>
+  );
+}
+
 export function KliprLogo({ href = "/", compact = false, className = "" }: LogoProps) {
-  const mark = <svg aria-hidden="true" className="shrink-0" viewBox="0 0 96 96" fill="none"><path fill="#08A85A" d="M18 8h22c5.5 0 10 4.5 10 10v20.7L71.7 12A10 10 0 0 1 87.2 24.7L61 48l26.2 23.3A10 10 0 0 1 71.7 84L50 57.3V78c0 5.5-4.5 10-10 10H18C12.5 88 8 83.5 8 78V18C8 12.5 12.5 8 18 8Z"/><path fill="white" d="M30 28.4c0-3.1 3.4-5 6.1-3.3l27 16.8a7.2 7.2 0 0 1 0 12.2l-27 16.8A4 4 0 0 1 30 67.5V28.4Z"/></svg>;
-  return <Link href={href} aria-label="Klipr home" className={`inline-flex items-center gap-2.5 ${className}`}>{mark}{!compact && <span className="font-[Arial_Rounded_MT_Bold,Arial,sans-serif] text-[1.55rem] font-black tracking-[-0.09em] text-black">Klipr</span>}</Link>;
+  return (
+    <Link href={href} aria-label="Klipr home" className={`inline-flex items-center gap-3 ${className}`}>
+      <KliprMark />
+      {!compact && (
+        <span className="text-[2rem] font-black leading-none text-black" style={{ fontFamily: '"Arial Rounded MT Bold", "Arial Black", Arial, sans-serif', letterSpacing: "-0.075em" }}>
+          Klipr
+        </span>
+      )}
+    </Link>
+  );
 }
