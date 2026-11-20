@@ -121,37 +121,67 @@ export type CreatorSuggestion = {
   status: "new" | "reviewed";
   created_at: string;
 };
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API = (process.env.NEXT_PUBLIC_API_URL || "/api").replace(/\/$/, "");
+
+function errorMessage(status: number, body: unknown): string {
+  const detail = (body as { detail?: unknown; message?: unknown } | null)?.detail ??
+    (body as { message?: unknown } | null)?.message;
+  if (Array.isArray(detail)) {
+    const fields = detail
+      .map((item) => {
+        const value = item as { loc?: unknown[]; msg?: unknown };
+        const field = Array.isArray(value.loc) ? value.loc.filter((part) => part !== "body").join(".") : "";
+        return field ? `${field}: ${String(value.msg ?? "invalid value")}` : String(value.msg ?? "invalid value");
+      })
+      .join(" · ");
+    return `خطأ في البيانات (${status}): ${fields}`;
+  }
+  if (typeof detail === "string" && detail.trim()) return `${detail} (${status})`;
+  return `فشل الطلب من الخادم (${status})`;
+}
+
+function handleUnauthorized(path: string) {
+  if (typeof window === "undefined" || path.startsWith("/auth/")) return;
+  // The auth cookie is HttpOnly; the logout endpoint clears it server-side.
+  void fetch(`${API}/auth/logout`, { method: "POST", credentials: "include" }).catch(() => undefined);
+  window.location.assign("/login?reason=session-expired");
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API}${path}`, {
-    ...init,
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...init?.headers },
-    cache: "no-store",
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API}${path}`, {
+      ...init,
+      credentials: "include",
+      headers: { "Content-Type": "application/json", ...init?.headers },
+      cache: "no-store",
+    });
+  } catch {
+    throw new Error("تعذّر الاتصال بالخادم — تأكد من تشغيل الباك إند والاتصال بالشبكة.");
+  }
   if (!response.ok) {
     const body = await response.json().catch(() => null);
-    throw Object.assign(
-      new Error(
-        typeof body?.detail === "string" ? body.detail : "Request failed",
-      ),
-      { detail: body?.detail },
-    );
+    if (response.status === 401) handleUnauthorized(path);
+    throw Object.assign(new Error(errorMessage(response.status, body)), { detail: body?.detail, status: response.status });
   }
   return response.status === 204 ? (undefined as T) : response.json();
 }
 async function upload<T>(path: string, body: FormData): Promise<T> {
-  const response = await fetch(`${API}${path}`, {
-    method: "POST",
-    body,
-    credentials: "include",
-    cache: "no-store",
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API}${path}`, {
+      method: "POST",
+      body,
+      credentials: "include",
+      cache: "no-store",
+    });
+  } catch {
+    throw new Error("تعذّر الاتصال بالخادم — تأكد من تشغيل الباك إند والاتصال بالشبكة.");
+  }
   if (!response.ok) {
     const data = await response.json().catch(() => null);
-    throw new Error(
-      typeof data?.detail === "string" ? data.detail : "Request failed",
-    );
+    if (response.status === 401) handleUnauthorized(path);
+    throw Object.assign(new Error(errorMessage(response.status, data)), { detail: data?.detail, status: response.status });
   }
   return response.json();
 }

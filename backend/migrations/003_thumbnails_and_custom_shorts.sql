@@ -6,4 +6,5 @@ ALTER TABLE streams ADD COLUMN IF NOT EXISTS enable_end_screen BOOLEAN NOT NULL 
 ALTER TABLE streams ADD COLUMN IF NOT EXISTS archive_logo_key TEXT;
 ALTER TABLE streams ADD COLUMN IF NOT EXISTS archive_tagline VARCHAR(240);
 ALTER TABLE clips ADD COLUMN IF NOT EXISTS thumbnail_key TEXT;
+ALTER TABLE streams DROP CONSTRAINT IF EXISTS streams_target_duration_check;
 ALTER TABLE streams ADD CONSTRAINT streams_target_duration_check CHECK (target_clip_duration BETWEEN 10 AND 180);

@@ -13,7 +13,8 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, Response, Uploa
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, text
-from app.db import SessionLocal
+from app.db import Base, SessionLocal, engine
+from app.migrations import apply_migrations
 from app.config import get_settings
 from app.models import ArchiveBranding, Clip, CreatorSuggestion, Notification, SavedThumbnail, Stream, StreamStatus, WatchlistSubscription
 from app.storage import copy_file, delete_files, presigned_download_url, upload_file
@@ -23,6 +24,15 @@ from app.api.credentials import router as credentials_router
 app = FastAPI(title="Klipr.cloud API", description="On-demand creator stream capture and AI clip studio.", version="0.3.0")
 app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in get_settings().klipr_cors_origins.split(",") if origin.strip()], allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"], allow_headers=["Content-Type"], allow_credentials=True)
 app.include_router(credentials_router)
+
+
+@app.on_event("startup")
+def initialize_database() -> None:
+    """Create the current schema, then apply versioned upgrades for existing DBs."""
+    if engine is None:
+        return
+    Base.metadata.create_all(bind=engine)
+    apply_migrations(engine)
 
 
 @app.middleware("http")
