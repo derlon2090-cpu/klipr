@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     r2_presigned_url_ttl_seconds: int = 3600
     klipr_access_password: str = ""
     klipr_session_secret: str = ""
+    kick_vault_key: str = ""
     klipr_allowed_email: str = "klipr.cloud@gmail.com"
     klipr_secure_cookies: bool = False
     klipr_cors_origins: str = "https://klipr.cloud,https://klipr-zeta.vercel.app"

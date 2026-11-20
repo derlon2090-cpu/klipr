@@ -1,6 +1,7 @@
 """Direct URL recording tasks. No polling or scheduler is used."""
 import subprocess
 import time
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
@@ -8,7 +9,8 @@ import redis
 from celery import shared_task
 from app.config import get_settings
 from app.db import SessionLocal
-from app.models import Stream, StreamStatus
+from app.core.crypto import decrypt_secret
+from app.models import Notification, SessionCredential, Stream, StreamStatus
 from app.storage import download_file, upload_file
 
 WORK_ROOT = Path("/var/lib/klipr")
@@ -38,6 +40,48 @@ def _terminate(process: subprocess.Popen) -> None:
         try: process.wait(timeout=15)
         except subprocess.TimeoutExpired: process.kill()
 
+
+def _expire_session(platform: str) -> None:
+    """Mark the vault entry expired and create one high-priority bell alert."""
+    with SessionLocal() as db:
+        credential = db.get(SessionCredential, platform)
+        if not credential or credential.status == "expired": return
+        credential.status = "expired"
+        existing = db.query(Notification).filter(Notification.status == "session_expired", Notification.channel_url == f"session://{platform}", Notification.is_read.is_(False)).first()
+        if not existing:
+            label = "Kick" if platform == "kick" else "Twitch"
+            db.add(Notification(title=f"انتهت صلاحية جلسة {label}", message=f"انتهت صلاحية جلسة {label} — يرجى تجديد الجلسة للاستمرار في التسجيل بجودة 1080p60", channel_url=f"session://{platform}", status="session_expired", is_read=False))
+        db.commit()
+
+
+def _session_capture_options(platform: str, scratch: Path) -> tuple[list[str], Path | None]:
+    """Return Streamlink flags from an encrypted vault entry, never plaintext logs."""
+    if platform not in {"kick", "twitch"}: return [], None
+    with SessionLocal() as db:
+        credential = db.get(SessionCredential, platform)
+        if not credential or credential.status != "active" or not credential.session_encrypted:
+            return (["--twitch-disable-ads"] if platform == "twitch" else []), None
+        if credential.expires_at and credential.expires_at <= datetime.now(timezone.utc):
+            _expire_session(platform)
+            return (["--twitch-disable-ads"] if platform == "twitch" else []), None
+        plaintext = decrypt_secret(credential.session_encrypted)
+    cookie_file = scratch / f"{platform}_cookies.txt"
+    cookie_file.write_text(plaintext, encoding="utf-8")
+    os.chmod(cookie_file, 0o600)
+    # Streamlink accepts individual HTTP cookies; retain the restricted file so
+    # the exact session artifact is isolated and always cleaned in finally.
+    flags: list[str] = []
+    if "\t" in plaintext:
+        for line in plaintext.splitlines():
+            if line.startswith("#") or "\t" not in line: continue
+            columns = line.split("\t")
+            if len(columns) >= 7: flags.extend(["--http-cookie", f"{columns[5]}={columns[6]}"])
+    elif plaintext.lower().startswith("bearer "):
+        flags.extend(["--http-header", f"Authorization={plaintext}"])
+    else:
+        flags.extend(["--http-cookie", f"kick_session={plaintext}"])
+    return flags, cookie_file
+
 @shared_task
 def record_stream(stream_id: str, normalized_url: str | None = None, owner_key: str | None = None) -> None:
     """Copy best-quality live media and reconnect only following an unexpected exit."""
@@ -45,15 +89,18 @@ def record_stream(stream_id: str, normalized_url: str | None = None, owner_key: 
     with SessionLocal() as db:
         stream = db.get(Stream, sid)
         if stream is None: return
-        source_url = stream.source_url
+        source_url, platform = stream.source_url, stream.platform
     client, chunks_dir = redis_client(), WORK_ROOT / stream_id / "chunks"
     chunks_dir.mkdir(parents=True, exist_ok=True)
     _set_status(sid, StreamStatus.recording, started_at=datetime.now(timezone.utc), stop_requested=False)
     ended = False
+    cookie_file: Path | None = None
     try:
+        session_flags, cookie_file = _session_capture_options(platform, chunks_dir)
         for attempt in range(settings.recording_max_reconnects + 1):
             command = ["streamlink", "--stdout", "--hls-live-restart", "--stream-segment-threads", "3", "--stream-timeout", "30", "--retry-max", "5", "--retry-open", "3"]
             if settings.egress_proxy_url: command.extend(["--http-proxy", settings.egress_proxy_url])
+            command.extend(session_flags)
             command.extend([source_url, "best"])
             streamlink = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
             ffmpeg = subprocess.Popen(["ffmpeg", "-hide_banner", "-loglevel", "warning", "-i", "pipe:0", "-c", "copy", "-f", "segment", "-segment_time", str(settings.recording_chunk_seconds), "-reset_timestamps", "1", str(chunks_dir / "chunk-%06d.ts")], stdin=streamlink.stdout, shell=False)
@@ -64,6 +111,14 @@ def record_stream(stream_id: str, normalized_url: str | None = None, owner_key: 
                     stopped = True; _terminate(ffmpeg); _terminate(streamlink); break
                 time.sleep(1)
             streamlink.wait()
+            stderr = streamlink.stderr.read() if streamlink.stderr else b""
+            # Treat provider auth rejection as non-fatal: alert, then retry as guest.
+            if cookie_file and (b"401" in (stderr or b"") or b"403" in (stderr or b"")):
+                _expire_session(platform)
+                try: cookie_file.unlink(missing_ok=True)
+                finally: cookie_file = None
+                session_flags = ["--twitch-disable-ads"] if platform == "twitch" else []
+                continue
             if stopped or ffmpeg.returncode == 0:
                 ended = True; break  # manual stop or provider EOF
             if attempt == settings.recording_max_reconnects: break
@@ -84,6 +139,8 @@ def record_stream(stream_id: str, normalized_url: str | None = None, owner_key: 
         raise
     finally:
         client.delete(stop_key(stream_id))
+        if cookie_file:
+            cookie_file.unlink(missing_ok=True)
 
 @shared_task
 def finalize_stream(stream_id: str, normalized_url: str | None = None, owner_key: str | None = None) -> None:

@@ -47,6 +47,17 @@ class ArchiveBranding(Base):
     use_default_thumbnail: Mapped[bool] = mapped_column(Boolean, default=True)
     default_left_vod_id: Mapped[UUID | None] = mapped_column(nullable=True)
     default_right_vod_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    auto_trim_ads: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class SessionCredential(Base):
+    """One encrypted, global capture session per supported platform."""
+    __tablename__ = "session_credentials"
+    platform: Mapped[str] = mapped_column(String(16), primary_key=True)
+    session_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="unset", nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class SavedThumbnail(Base):

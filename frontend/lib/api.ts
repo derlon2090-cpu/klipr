@@ -51,6 +51,7 @@ export type StreamPreview = {
 export type Branding = {
   enable_end_screen: boolean;
   remove_music: boolean;
+  auto_trim_ads: boolean;
   use_default_thumbnail: boolean;
   outro_duration_seconds: number;
   archive_channel_name: string | null;
@@ -93,7 +94,8 @@ export type NotificationItem = {
     | "pending_auto_record"
     | "auto_started"
     | "cancelled"
-    | "manual_taken_over";
+    | "manual_taken_over"
+    | "session_expired";
   is_read: boolean;
   scheduled_for: string | null;
   created_at: string;
@@ -102,6 +104,15 @@ export type NotificationsResponse = {
   unread_count: number;
   items: NotificationItem[];
 };
+export type SessionStatus = "active" | "expiring_soon" | "expired" | "unset";
+export type SessionCredential = {
+  platform: "kick" | "twitch";
+  has_session: boolean;
+  status: SessionStatus;
+  updated_at: string | null;
+  expires_at: string | null;
+};
+export type Credentials = Record<"kick" | "twitch", SessionCredential>;
 export type CreatorSuggestion = {
   id: string;
   creator_name: string;
@@ -198,6 +209,14 @@ export const api = {
   notifications: () => request<NotificationsResponse>("/notifications"),
   readAllNotifications: () =>
     request<void>("/notifications/read-all", { method: "POST" }),
+  credentials: () => request<Credentials>("/credentials"),
+  saveCredential: (platform: "kick" | "twitch", content: string) =>
+    request<SessionCredential>(`/credentials/${platform}`, {
+      method: "PUT",
+      body: JSON.stringify({ content }),
+    }),
+  deleteCredential: (platform: "kick" | "twitch") =>
+    request<void>(`/credentials/${platform}`, { method: "DELETE" }),
   cancelAutoRecord: (id: string) =>
     request<NotificationItem>(`/notifications/${id}/cancel`, {
       method: "POST",

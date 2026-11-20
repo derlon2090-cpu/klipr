@@ -10,6 +10,7 @@ import {
   LogOut,
   Menu,
   MessageSquareText,
+  KeyRound,
   Plus,
   Radio,
   Sparkles,
@@ -26,7 +27,8 @@ export type DashboardSection =
   | "shorts"
   | "thumbnail"
   | "branding"
-  | "suggestions";
+  | "suggestions"
+  | "session";
 
 export function Shell({
   children,
@@ -174,6 +176,14 @@ export function Shell({
       en: "Branding & Outro",
       hintAr: "هوية قناة الأرشيف",
       hintEn: "Archive identity",
+    },
+    {
+      id: "session",
+      icon: KeyRound,
+      ar: "الجلسة",
+      en: "Session Vault",
+      hintAr: "Kick و Twitch بأمان",
+      hintEn: "Secure stream sessions",
     },
     {
       id: "suggestions",

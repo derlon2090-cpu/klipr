@@ -18,9 +18,11 @@ from app.config import get_settings
 from app.models import ArchiveBranding, Clip, CreatorSuggestion, Notification, SavedThumbnail, Stream, StreamStatus, WatchlistSubscription
 from app.storage import copy_file, delete_files, presigned_download_url, upload_file
 from app.worker.tasks import WORK_ROOT, active_key, record_stream, redis_client, stop_key, task_key
+from app.api.credentials import router as credentials_router
 
 app = FastAPI(title="Klipr.cloud API", description="On-demand creator stream capture and AI clip studio.", version="0.3.0")
 app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in get_settings().klipr_cors_origins.split(",") if origin.strip()], allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"], allow_headers=["Content-Type"], allow_credentials=True)
+app.include_router(credentials_router)
 
 
 @app.middleware("http")
@@ -119,6 +121,7 @@ class ProcessRequest(BaseModel):
 class BrandingRequest(BaseModel):
     enable_end_screen: bool = True
     remove_music: bool = False
+    auto_trim_ads: bool = False
     use_default_thumbnail: bool = True
     outro_duration_seconds: int = 15
     archive_channel_name: str | None = None
@@ -253,6 +256,7 @@ def _ensure_preset_schema(db):
         db.execute(text("ALTER TABLE archive_branding ADD COLUMN IF NOT EXISTS use_default_thumbnail BOOLEAN NOT NULL DEFAULT TRUE"))
         db.execute(text("ALTER TABLE streams ADD COLUMN IF NOT EXISTS short_thumbnail_key TEXT"))
         db.execute(text("ALTER TABLE archive_branding ADD COLUMN IF NOT EXISTS remove_music BOOLEAN NOT NULL DEFAULT FALSE"))
+        db.execute(text("ALTER TABLE archive_branding ADD COLUMN IF NOT EXISTS auto_trim_ads BOOLEAN NOT NULL DEFAULT FALSE"))
         db.execute(text("ALTER TABLE streams ADD COLUMN IF NOT EXISTS remove_music BOOLEAN NOT NULL DEFAULT FALSE"))
         db.execute(text("CREATE TABLE IF NOT EXISTS saved_thumbnails (id UUID PRIMARY KEY, kind VARCHAR(16) NOT NULL, storage_key TEXT NOT NULL UNIQUE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), CONSTRAINT saved_thumbnails_kind_check CHECK (kind IN ('vod', 'short')))"))
         db.execute(text("CREATE INDEX IF NOT EXISTS ix_saved_thumbnails_kind ON saved_thumbnails(kind)"))
@@ -324,7 +328,7 @@ def _branding(db):
 @app.get("/branding")
 def get_branding():
     with SessionLocal() as db:
-        item = _branding(db); return {"enable_end_screen":item.enable_end_screen,"remove_music":item.remove_music,"use_default_thumbnail":item.use_default_thumbnail,"outro_duration_seconds":item.outro_duration_seconds,"archive_channel_name":item.archive_channel_name,"archive_tagline":item.archive_tagline,"archive_logo_key":item.archive_logo_key,"archive_logo_url":presigned_download_url(item.archive_logo_key) if item.archive_logo_key else None,"default_thumbnail_key":item.default_thumbnail_key,"default_thumbnail_url":presigned_download_url(item.default_thumbnail_key) if item.default_thumbnail_key else None,"default_short_thumbnail_key":item.default_short_thumbnail_key,"default_short_thumbnail_url":presigned_download_url(item.default_short_thumbnail_key) if item.default_short_thumbnail_key else None,"default_left_vod_id":item.default_left_vod_id,"default_right_vod_id":item.default_right_vod_id}
+        item = _branding(db); return {"enable_end_screen":item.enable_end_screen,"remove_music":item.remove_music,"auto_trim_ads":item.auto_trim_ads,"use_default_thumbnail":item.use_default_thumbnail,"outro_duration_seconds":item.outro_duration_seconds,"archive_channel_name":item.archive_channel_name,"archive_tagline":item.archive_tagline,"archive_logo_key":item.archive_logo_key,"archive_logo_url":presigned_download_url(item.archive_logo_key) if item.archive_logo_key else None,"default_thumbnail_key":item.default_thumbnail_key,"default_thumbnail_url":presigned_download_url(item.default_thumbnail_key) if item.default_thumbnail_key else None,"default_short_thumbnail_key":item.default_short_thumbnail_key,"default_short_thumbnail_url":presigned_download_url(item.default_short_thumbnail_key) if item.default_short_thumbnail_key else None,"default_left_vod_id":item.default_left_vod_id,"default_right_vod_id":item.default_right_vod_id}
 @app.put("/branding")
 def put_branding(payload: BrandingRequest):
     if not 10 <= payload.outro_duration_seconds <= 20: raise HTTPException(422,"outro_duration_seconds must be between 10 and 20")

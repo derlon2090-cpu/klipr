@@ -18,6 +18,7 @@ import {
   Trash2,
   Upload,
   WandSparkles,
+  KeyRound,
   X,
 } from "lucide-react";
 import {
@@ -26,6 +27,7 @@ import {
   Branding,
   CreatorSuggestion,
   SavedThumbnail,
+  Credentials,
   Stream,
   StreamPreview,
 } from "@/lib/api";
@@ -36,6 +38,7 @@ import { useLanguage } from "@/components/language";
 const emptyBranding: Branding = {
   enable_end_screen: true,
   remove_music: false,
+  auto_trim_ads: false,
   use_default_thumbnail: true,
   outro_duration_seconds: 15,
   archive_channel_name: "",
@@ -56,6 +59,7 @@ const validSections: DashboardSection[] = [
   "thumbnail",
   "branding",
   "suggestions",
+  "session",
 ];
 const platformClass = (platform: string) =>
   platform === "twitch"
@@ -122,6 +126,10 @@ function Empty({ text }: { text: string }) {
 }
 const inputClass =
   "mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100";
+const emptyCredentials: Credentials = {
+  kick: { platform: "kick", has_session: false, status: "unset", updated_at: null, expires_at: null },
+  twitch: { platform: "twitch", has_session: false, status: "unset", updated_at: null, expires_at: null },
+};
 
 export default function Dashboard() {
   const { language } = useLanguage();
@@ -154,6 +162,11 @@ export default function Dashboard() {
     [savingBrand, setSavingBrand] = useState(false);
   const [suggestions, setSuggestions] = useState<CreatorSuggestion[]>([]),
     [suggestionsBusy, setSuggestionsBusy] = useState(false);
+  const [credentials, setCredentials] = useState<Credentials>(emptyCredentials);
+  const [sessionInput, setSessionInput] = useState<Record<"kick" | "twitch", string>>({ kick: "", twitch: "" });
+  const [sessionBusy, setSessionBusy] = useState<"kick" | "twitch" | null>(null);
+
+  const loadCredentials = () => api.credentials().then(setCredentials).catch(() => undefined);
 
   const loadSuggestions = async () => {
     setSuggestionsBusy(true);
@@ -196,6 +209,7 @@ export default function Dashboard() {
     ) as DashboardSection | null;
     if (query && validSections.includes(query)) setSection(query);
     load();
+    loadCredentials();
     Promise.all([api.branding(), api.savedThumbnails()])
       .then(([value, thumbnails]) => {
         setBranding(value);
@@ -208,6 +222,7 @@ export default function Dashboard() {
   }, []);
   useEffect(() => {
     if (section === "suggestions") loadSuggestions();
+    if (section === "session") loadCredentials();
   }, [section]);
   useEffect(() => {
     const value = url.trim();
@@ -2161,6 +2176,58 @@ export default function Dashboard() {
     </>
   );
 
+  const sessionView = (
+    <>
+      <SectionTitle
+        eyebrow={ar ? "خزنة مشفّرة" : "Encrypted vault"}
+        title={ar ? "الجلسة" : "Session Vault"}
+        description={ar ? "اربط جلسات Kick وTwitch محلياً لتسجيل المصدر بأفضل جودة. لا تظهر الكوكيز أو الرموز بعد حفظها." : "Store Kick and Twitch sessions locally for best-source capture. Cookies and tokens are never shown after saving."}
+        icon={KeyRound}
+      />
+      <div className="grid gap-5 xl:grid-cols-2">
+        {(["kick", "twitch"] as const).map((platform) => {
+          const item = credentials[platform];
+          const expired = item.status === "expired";
+          const active = item.status === "active";
+          const date = (value: string | null) => value ? new Intl.DateTimeFormat(ar ? "ar-SA" : "en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "—";
+          const save = async () => {
+            if (!sessionInput[platform].trim()) return;
+            setSessionBusy(platform);
+            try {
+              const next = await api.saveCredential(platform, sessionInput[platform]);
+              setCredentials((current) => ({ ...current, [platform]: next }));
+              setSessionInput((current) => ({ ...current, [platform]: "" }));
+              setMessage(ar ? "تم حفظ وتشفير الجلسة." : "Session encrypted and saved.");
+            } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to save session"); }
+            finally { setSessionBusy(null); }
+          };
+          const removeSession = async () => {
+            setSessionBusy(platform);
+            try {
+              await api.deleteCredential(platform);
+              setCredentials((current) => ({ ...current, [platform]: { ...emptyCredentials[platform], updated_at: new Date().toISOString() } }));
+              setSessionInput((current) => ({ ...current, [platform]: "" }));
+            } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to remove session"); }
+            finally { setSessionBusy(null); }
+          };
+          return <section key={platform} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div><p className="text-xs font-black uppercase tracking-[.16em] text-emerald-600">{platform === "kick" ? "Kick 1080p60 Session" : "Twitch 1080p60 & Ad-Free Session"}</p>
+                <h2 className="mt-1 text-xl font-black">{active ? (ar ? "متصل • جودة 1080p60 مفعّلة" : "Connected • 1080p60 enabled") : expired ? (ar ? "منتهية الصلاحية — يلزم التجديد" : "Expired — renew required") : (ar ? "غير مربوط" : "Not connected")}</h2></div>
+              <span className={`mt-1 size-3 rounded-full ${active ? "bg-emerald-500" : expired ? "bg-amber-500" : "bg-slate-300"}`} aria-label={item.status} />
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-3 text-xs"><div><p className="text-slate-400">{ar ? "آخر تحديث" : "Last updated"}</p><b>{date(item.updated_at)}</b></div><div><p className="text-slate-400">{ar ? "انتهاء الكوكيز" : "Cookie expiry"}</p><b>{date(item.expires_at)}</b></div></div>
+            <div className="mt-5 rounded-xl border border-emerald-100 bg-emerald-50/50 p-4 text-xs leading-6 text-slate-600"><b className="text-emerald-800">{ar ? "دليل سريع (15 ثانية)" : "Quick guide (15 seconds)"}</b><ol className="mt-1 list-decimal ps-5"><li>{ar ? "افتح جلسة ثانوية مسجّل الدخول في المتصفح." : "Open a secondary signed-in browser session."}</li><li>{ar ? "انسخ cookies.txt بصيغة Netscape أو session_token." : "Copy Netscape cookies.txt or a session token."}</li><li>{ar ? "الصقه هنا ثم احفظه مشفراً." : "Paste it here and save encrypted."}</li></ol></div>
+            {platform === "twitch" && <p className="mt-4 rounded-xl bg-violet-50 p-3 text-xs font-bold leading-5 text-violet-800">اربط جلسة حساب Twitch Turbo لضمان تسجيل خام 1080p60 بدون أي إعلانات أو انقطاع أثناء اللقطات القوية.</p>}
+            <label className="mt-5 block text-xs font-black text-slate-700">{ar ? "كوكيز أو رمز الجلسة" : "Cookies or session token"}<textarea value={sessionInput[platform]} onChange={(event) => setSessionInput((current) => ({ ...current, [platform]: event.target.value }))} maxLength={65536} rows={5} className={inputClass} placeholder={platform === "kick" ? "cookies.txt أو kick_session" : "cookies.txt أو Bearer token"} /></label>
+            <label className="mt-3 inline-flex cursor-pointer items-center gap-2 text-xs font-bold text-emerald-700"><Upload size={15}/>{ar ? "تحميل ملف .txt" : "Load .txt file"}<input className="hidden" type="file" accept=".txt,text/plain" onChange={async (event) => { const file = event.target.files?.[0]; if (file) { const content = await file.text(); setSessionInput((current) => ({ ...current, [platform]: content.slice(0, 65536) })); } event.currentTarget.value = ""; }} /></label>
+            <div className="mt-5 flex flex-wrap gap-3"><button disabled={sessionBusy === platform || !sessionInput[platform].trim()} onClick={save} className="rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-black text-white disabled:opacity-50">{ar ? "حفظ وتشفير الجلسة" : "Save encrypted session"}</button><button disabled={sessionBusy === platform || !item.has_session} onClick={removeSession} className="rounded-xl border border-rose-300 px-4 py-2.5 text-xs font-black text-rose-600 disabled:opacity-50">{ar ? "حذف الجلسة" : "Delete session"}</button></div>
+          </section>;
+        })}
+      </div>
+    </>
+  );
+  const hasExpiredSession = Object.values(credentials).some((item) => item.status === "expired");
   const content =
     section === "live"
       ? liveView
@@ -2172,7 +2239,7 @@ export default function Dashboard() {
             ? thumbnailView
             : section === "branding"
               ? brandingView
-              : suggestionsView;
+              : section === "session" ? sessionView : suggestionsView;
   return (
     <Shell
       activeCount={active.length}
@@ -2180,6 +2247,12 @@ export default function Dashboard() {
       onSectionChange={changeSection}
     >
       <div className="mx-auto max-w-[1500px]">
+        {hasExpiredSession && section !== "session" && (
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-900">
+            <span>{ar ? "انتهت صلاحية جلسة البث — جدّدها للاستمرار بجودة 1080p60." : "A stream session expired — renew it to continue 1080p60 capture."}</span>
+            <button onClick={() => changeSection("session")} className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-black text-white">{ar ? "تجديد الجلسة الآن" : "Renew session now"}</button>
+          </div>
+        )}
         {message && (
           <div
             className={`mb-5 flex items-center justify-between rounded-xl border px-4 py-3 text-sm font-bold ${/نجاح|تم |started|saved|uploaded/i.test(message) ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-rose-200 bg-rose-50 text-rose-700"}`}
