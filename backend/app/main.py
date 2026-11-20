@@ -43,6 +43,19 @@ class DatabaseUnavailable(RuntimeError):
     """Raised when a request needs the database but it is not configured."""
 
 
+def _database_error_summary(error: Exception) -> str:
+    """Keep production diagnostics useful without logging database credentials."""
+    original = getattr(error, "orig", error)
+    message = " ".join(str(original).split())
+    message = re.sub(
+        r"(postgres(?:ql)?(?:\+[^:]*)?://)[^@\s]+@",
+        r"\1***@",
+        message,
+        flags=re.IGNORECASE,
+    )
+    return f"{type(error).__name__}: {message[:600]}"
+
+
 def ensure_database_schema() -> None:
     """Initialize schema once per process, including serverless cold starts.
 
@@ -76,7 +89,7 @@ def initialize_database() -> None:
     except SQLAlchemyError as error:
         # Keep health/auth available while a transient database outage recovers.
         # The first later data request retries initialization.
-        print(f"database startup initialization failed: {type(error).__name__}")
+        print(f"database startup initialization failed: {_database_error_summary(error)}")
 
 
 @app.exception_handler(DatabaseUnavailable)
@@ -90,7 +103,7 @@ async def database_configuration_error(_request: Request, error: DatabaseUnavail
 @app.exception_handler(SQLAlchemyError)
 async def database_runtime_error(_request: Request, error: SQLAlchemyError):
     # Log the server-side exception without exposing credentials or SQL to users.
-    print(f"database request failed: {type(error).__name__}")
+    print(f"database request failed: {_database_error_summary(error)}")
     return JSONResponse(
         status_code=503,
         content={"detail": "تعذّر الاتصال بقاعدة البيانات مؤقتًا. حاول مجددًا.", "code": "database_unavailable"},
