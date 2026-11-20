@@ -1,14 +1,20 @@
 from pathlib import Path
 import boto3
+from botocore.config import Config
 from .config import get_settings
+
+
+class StorageUnavailable(RuntimeError):
+    """Raised when the media object store has not been configured."""
 
 
 def r2_client():
     s = get_settings()
     if not all([s.r2_endpoint_url, s.r2_access_key_id, s.r2_secret_access_key]):
-        raise RuntimeError("Cloudflare R2 credentials are not configured")
+        raise StorageUnavailable("S3-compatible storage credentials are not configured")
     return boto3.client("s3", endpoint_url=s.r2_endpoint_url, region_name=s.r2_region,
-        aws_access_key_id=s.r2_access_key_id, aws_secret_access_key=s.r2_secret_access_key)
+        aws_access_key_id=s.r2_access_key_id, aws_secret_access_key=s.r2_secret_access_key,
+        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}))
 
 
 def upload_file(path: Path, key: str, content_type: str = "video/mp2t") -> None:

@@ -17,12 +17,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, text
 from sqlalchemy.exc import SQLAlchemyError
+from botocore.exceptions import BotoCoreError, ClientError
 from redis.exceptions import RedisError
 from app.db import Base, SessionLocal, engine
 from app.migrations import apply_migrations
 from app.config import get_settings
 from app.models import ArchiveBranding, Clip, CreatorSuggestion, Notification, SavedThumbnail, Stream, StreamStatus, Vod, VodStatus, WatchlistSubscription
-from app.storage import copy_file, delete_files, presigned_download_url, upload_file
+from app.storage import StorageUnavailable, copy_file, delete_files, presigned_download_url, r2_client, upload_file
 from app.worker.tasks import WORK_ROOT, active_key, record_stream, redis_client, stop_key, task_key
 from app.worker.vods import VOD_ROOT, import_vod
 from app.api.credentials import router as credentials_router
@@ -116,6 +117,24 @@ async def redis_runtime_error(_request: Request, error: RedisError):
     return JSONResponse(
         status_code=503,
         content={"detail": "خدمة المهام غير متاحة مؤقتًا. حاول مجددًا.", "code": "queue_unavailable"},
+    )
+
+
+@app.exception_handler(StorageUnavailable)
+async def storage_configuration_error(_request: Request, error: StorageUnavailable):
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "تخزين الوسائط غير مهيأ للخادم.", "code": "storage_not_configured"},
+    )
+
+
+@app.exception_handler(BotoCoreError)
+@app.exception_handler(ClientError)
+async def storage_runtime_error(_request: Request, error: Exception):
+    print(f"storage request failed: {type(error).__name__}")
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "خدمة تخزين الوسائط غير متاحة مؤقتًا.", "code": "storage_unavailable"},
     )
 
 
@@ -397,8 +416,20 @@ def readiness():
         queue_ok = bool(redis_client().ping())
     except RedisError:
         pass
-    payload = {"ok": queue_ok, "database": "ready", "queue": "ready" if queue_ok else "unavailable"}
-    return payload if queue_ok else JSONResponse(status_code=503, content=payload)
+    storage_ok = False
+    try:
+        r2_client().head_bucket(Bucket=get_settings().r2_bucket)
+        storage_ok = True
+    except (StorageUnavailable, BotoCoreError, ClientError):
+        pass
+    ready = queue_ok and storage_ok
+    payload = {
+        "ok": ready,
+        "database": "ready",
+        "queue": "ready" if queue_ok else "unavailable",
+        "storage": "ready" if storage_ok else "unavailable",
+    }
+    return payload if ready else JSONResponse(status_code=503, content=payload)
 
 
 @app.post("/vods/import", status_code=202)
