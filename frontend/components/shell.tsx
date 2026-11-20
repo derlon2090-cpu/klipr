@@ -17,7 +17,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { api, NotificationItem, WatchlistSubscription } from "@/lib/api";
+import { api, NotificationItem, SessionStatus, WatchlistSubscription } from "@/lib/api";
 import { KliprLogo } from "@/components/logo";
 import { LanguageToggle, useLanguage } from "@/components/language";
 
@@ -53,17 +53,26 @@ export function Shell({
   const [bellError, setBellError] = useState("");
   const [bellBusy, setBellBusy] = useState(false);
   const [bellNow, setBellNow] = useState(Date.now());
+  const [sessionStatus, setSessionStatus] = useState<SessionStatus>("unset");
   const { language, t } = useLanguage();
   const ar = language === "ar";
   const refreshBell = async () => {
     try {
-      const [alerts, creators] = await Promise.all([
+      const [alerts, creators, credentials] = await Promise.all([
         api.notifications(),
         api.watchlist(),
+        api.credentials(),
       ]);
       setNotifications(alerts.items);
       setUnreadCount(alerts.unread_count);
       setSubscriptions(creators);
+      setSessionStatus(
+        Object.values(credentials).some((item) => item.status === "expired")
+          ? "expired"
+          : Object.values(credentials).some((item) => item.status === "active")
+            ? "active"
+            : "unset",
+      );
     } catch {
       /* Session and API errors remain non-blocking for the dashboard. */
     }
@@ -134,64 +143,56 @@ export function Shell({
     icon: typeof Radio;
     ar: string;
     en: string;
-    hintAr: string;
-    hintEn: string;
+    group: "capture" | "studio" | "system";
   }[] = [
     {
       id: "live",
       icon: Radio,
       ar: "البثوث النشطة",
       en: "Live Capture",
-      hintAr: "التسجيل المباشر",
-      hintEn: "Record live",
+      group: "capture",
     },
     {
       id: "archive",
       icon: Archive,
       ar: "مكتبة الأرشيف",
       en: "VOD Archive",
-      hintAr: "التسجيلات المكتملة",
-      hintEn: "Completed VODs",
+      group: "capture",
     },
     {
       id: "shorts",
       icon: Clapperboard,
       ar: "صانع الشورتات",
       en: "Shorts & Clipper",
-      hintAr: "قصاص المقاطع الذكي",
-      hintEn: "AI clip studio",
+      group: "studio",
     },
     {
       id: "thumbnail",
       icon: ImageIcon,
       ar: "صانع الثامبنايل",
       en: "Thumbnail Studio",
-      hintAr: "أغلفة احترافية",
-      hintEn: "Cover creator",
+      group: "studio",
     },
     {
       id: "branding",
       icon: Sparkles,
       ar: "الهوية وشاشة النهاية",
       en: "Branding & Outro",
-      hintAr: "هوية قناة الأرشيف",
-      hintEn: "Archive identity",
+      group: "studio",
     },
     {
       id: "session",
       icon: KeyRound,
       ar: "الجلسة",
       en: "Session Vault",
-      hintAr: "Kick و Twitch بأمان",
-      hintEn: "Secure stream sessions",
+      group: "system",
     },
     {
       id: "suggestions",
       icon: MessageSquareText,
       ar: "الاقتراحات",
       en: "Suggestions",
-      hintAr: "اقتراحات المشاهير",
-      hintEn: "Creator requests",
+      group: "system",
     },
   ];
   const choose = (id: DashboardSection) => {
@@ -203,31 +204,29 @@ export function Shell({
     await api.logout();
     window.location.assign("/");
   };
+  const groups = [
+    { id: "capture", ar: "البث والأرشيف", en: "CAPTURE & ARCHIVE" },
+    { id: "studio", ar: "أدوات الإنتاج", en: "CREATOR STUDIO" },
+    { id: "system", ar: "الربط والنظام", en: "SYSTEM" },
+  ] as const;
   const nav = (
-    <nav className="space-y-2 p-3">
-      {items.map(({ id, icon: Icon, ar: arLabel, en, hintAr, hintEn }) => (
-        <button
-          key={id}
-          onClick={() => choose(id)}
-          className={`flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-start transition ${activeSection === id ? "border-emerald-200 bg-emerald-50 text-emerald-700 shadow-sm" : "border-transparent text-slate-600 hover:border-slate-200 hover:bg-slate-50"}`}
-        >
-          <span
-            className={`grid size-10 shrink-0 place-items-center rounded-lg ${activeSection === id ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"}`}
-          >
-            <Icon size={19} />
-          </span>
-          <span className="min-w-0">
-            <b className="block truncate text-sm">{ar ? arLabel : en}</b>
-            <small className="block truncate text-[11px] text-slate-400">
-              {ar ? hintAr : hintEn}
-            </small>
-          </span>
-          {id === "live" && activeCount > 0 && (
-            <span className="ms-auto rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-black text-white">
-              {activeCount}
-            </span>
-          )}
-        </button>
+    <nav className="space-y-2 px-3 py-2">
+      {groups.map((group) => (
+        <section key={group.id} className="pt-1">
+          <p className="px-3 pb-1 pt-2 text-[11px] font-semibold tracking-wider text-slate-400">
+            {ar ? group.ar : group.en}
+          </p>
+          <div className="space-y-1">
+            {items.filter((item) => item.group === group.id).map(({ id, icon: Icon, ar: arLabel, en }) => (
+              <button key={id} onClick={() => choose(id)} className={`flex w-full items-center gap-2.5 rounded-xl border px-3 py-2.5 text-start text-sm font-medium transition ${activeSection === id ? "border-emerald-200/80 bg-emerald-50 text-emerald-700 shadow-sm" : "border-transparent text-slate-600 hover:border-slate-200 hover:bg-slate-50"}`}>
+                <span className={`grid size-8 shrink-0 place-items-center rounded-lg ${activeSection === id ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-500"}`}><Icon size={17} /></span>
+                <span className="min-w-0 flex-1 truncate">{ar ? arLabel : en}</span>
+                {id === "live" && activeCount > 0 && <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-black text-white">{activeCount}</span>}
+                {id === "session" && <span className={`size-2.5 shrink-0 rounded-full ${sessionStatus === "active" ? "bg-emerald-500" : sessionStatus === "expired" ? "bg-amber-500" : "bg-slate-300"}`} aria-label={sessionStatus} />}
+              </button>
+            ))}
+          </div>
+        </section>
       ))}
     </nav>
   );
@@ -507,19 +506,12 @@ export function Shell({
         </div>
       </header>
       <aside className="fixed inset-y-0 start-0 z-40 hidden w-72 border-e border-slate-200 bg-white lg:flex lg:flex-col">
-        <div className="flex h-20 items-center border-b border-slate-100 px-6">
-          <KliprLogo href="/dashboard" className="[&_svg]:size-11" />
+        <div className="flex h-16 items-center border-b border-slate-100 px-4">
+          <KliprLogo href="/dashboard" className="[&_svg]:size-9" />
         </div>
-        <div className="flex-1 overflow-y-auto py-3">{nav}</div>
-        <div className="border-t border-slate-100 p-4">
-          <div className="rounded-xl bg-slate-50 p-3">
-            <p className="text-xs font-black text-slate-700">Klipr.cloud</p>
-            <p className="mt-1 text-[11px] leading-5 text-slate-400">
-              {ar
-                ? "من البث المباشر إلى محتوى جاهز للنشر."
-                : "From live stream to publish-ready content."}
-            </p>
-          </div>
+        <div className="flex-1 overflow-hidden">{nav}</div>
+        <div className="p-4 pt-2">
+          <p className="rounded-full bg-slate-50 px-3 py-2 text-center text-[11px] font-semibold text-slate-400">Klipr.cloud • Studio v1.0</p>
         </div>
       </aside>
       {open && (
@@ -531,8 +523,8 @@ export function Shell({
             className="h-full w-[86%] max-w-80 bg-white shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex h-20 items-center justify-between border-b border-slate-100 px-5">
-              <KliprLogo href="/dashboard" className="[&_svg]:size-10" />
+            <div className="flex h-16 items-center justify-between border-b border-slate-100 px-4">
+              <KliprLogo href="/dashboard" className="[&_svg]:size-9" />
               <button
                 onClick={() => setOpen(false)}
                 className="rounded-lg p-2 hover:bg-slate-100"
