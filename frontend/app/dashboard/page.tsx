@@ -1711,6 +1711,13 @@ export default function Dashboard() {
             >
               {thumbPlatform.toUpperCase()} · KLIPR
             </span>
+            {thumbFormat === "vod" && (
+              <span
+                className={`absolute start-4 top-14 rounded-md border px-2.5 py-1 text-[10px] font-black tracking-wide text-white shadow-sm ${thumbPlatform === "twitch" ? "border-[#9146FF] bg-slate-950/90" : "border-[#53FC18] bg-slate-950/90"}`}
+              >
+                1080 FULL HD
+              </span>
+            )}
           </div>
         </section>
       </div>
