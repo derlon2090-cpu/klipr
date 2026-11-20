@@ -17,5 +17,13 @@ def apply_migrations(engine) -> None:
             if file.name in applied:
                 continue
             # Migration files are repository-controlled SQL, never user input.
-            connection.execute(text(file.read_text(encoding="utf-8")))
+            # PostgreSQL drivers can reject a multi-statement prepared query.
+            # Repository migrations contain no procedural SQL, so executing their
+            # semicolon-delimited statements separately is deterministic.
+            for statement in file.read_text(encoding="utf-8").split(";"):
+                statement = "\n".join(
+                    line for line in statement.splitlines() if not line.lstrip().startswith("--")
+                ).strip()
+                if statement:
+                    connection.execute(text(statement))
             connection.execute(text("INSERT INTO schema_migrations (name) VALUES (:name)"), {"name": file.name})
