@@ -5,16 +5,19 @@ import json
 import secrets
 import time
 import re
+import threading
 from pathlib import Path
 from html import unescape
 from urllib.request import HTTPRedirectHandler, Request as UrlRequest, build_opener
 from urllib.parse import urlparse, urlunparse
 from uuid import UUID
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, text
+from sqlalchemy.exc import SQLAlchemyError
+from redis.exceptions import RedisError
 from app.db import Base, SessionLocal, engine
 from app.migrations import apply_migrations
 from app.config import get_settings
@@ -28,14 +31,79 @@ app = FastAPI(title="Klipr.cloud API", description="On-demand creator stream cap
 app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in get_settings().klipr_cors_origins.split(",") if origin.strip()], allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"], allow_headers=["Content-Type"], allow_credentials=True)
 app.include_router(credentials_router)
 
+_schema_lock = threading.Lock()
+_schema_initialized = False
+_DATABASE_FREE_PATHS = {
+    "/health", "/auth/password", "/auth/email", "/auth/me",
+    "/auth/logout", "/streams/preview", "/docs", "/openapi.json",
+}
+
+
+class DatabaseUnavailable(RuntimeError):
+    """Raised when a request needs the database but it is not configured."""
+
+
+def ensure_database_schema() -> None:
+    """Initialize schema once per process, including serverless cold starts.
+
+    Vercel/ASGI adapters do not consistently execute lifespan startup hooks.
+    The PostgreSQL advisory transaction lock also makes concurrent cold starts
+    safe: only one instance creates or migrates the schema at a time.
+    """
+    global _schema_initialized
+    if _schema_initialized:
+        return
+    if engine is None:
+        raise DatabaseUnavailable("DATABASE_URL is not configured")
+    with _schema_lock:
+        if _schema_initialized:
+            return
+        with engine.begin() as connection:
+            if connection.dialect.name == "postgresql":
+                connection.execute(text("SELECT pg_advisory_xact_lock(1263357018)"))
+            Base.metadata.create_all(bind=connection)
+            apply_migrations(connection)
+        _schema_initialized = True
+
 
 @app.on_event("startup")
 def initialize_database() -> None:
-    """Create the current schema, then apply versioned upgrades for existing DBs."""
+    """Eager initialization for conventional ASGI hosts."""
     if engine is None:
         return
-    Base.metadata.create_all(bind=engine)
-    apply_migrations(engine)
+    try:
+        ensure_database_schema()
+    except SQLAlchemyError as error:
+        # Keep health/auth available while a transient database outage recovers.
+        # The first later data request retries initialization.
+        print(f"database startup initialization failed: {type(error).__name__}")
+
+
+@app.exception_handler(DatabaseUnavailable)
+async def database_configuration_error(_request: Request, error: DatabaseUnavailable):
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "قاعدة البيانات غير مهيأة للخادم.", "code": "database_not_configured"},
+    )
+
+
+@app.exception_handler(SQLAlchemyError)
+async def database_runtime_error(_request: Request, error: SQLAlchemyError):
+    # Log the server-side exception without exposing credentials or SQL to users.
+    print(f"database request failed: {type(error).__name__}")
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "تعذّر الاتصال بقاعدة البيانات مؤقتًا. حاول مجددًا.", "code": "database_unavailable"},
+    )
+
+
+@app.exception_handler(RedisError)
+async def redis_runtime_error(_request: Request, error: RedisError):
+    print(f"redis request failed: {type(error).__name__}")
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "خدمة المهام غير متاحة مؤقتًا. حاول مجددًا.", "code": "queue_unavailable"},
+    )
 
 
 @app.middleware("http")
@@ -108,10 +176,18 @@ def _reserve_recording_slot(owner_key: str, stream_id: str) -> bool:
 
 @app.middleware("http")
 async def require_klipr_session(request: Request, call_next):
-    public_paths = {"/health", "/auth/password", "/auth/email", "/auth/me", "/webhooks/twitch/eventsub", "/docs", "/openapi.json"}
+    public_paths = {"/health", "/health/ready", "/auth/password", "/auth/email", "/auth/me", "/webhooks/twitch/eventsub", "/docs", "/openapi.json"}
     path = request.url.path.removeprefix("/api") or "/"
     public_suggestion = path == "/creator-suggestions" and request.method == "POST"
     if request.method == "OPTIONS" or path in public_paths or public_suggestion or _read_token(request.cookies.get("klipr_session"), "session"):
+        if request.method != "OPTIONS" and path not in _DATABASE_FREE_PATHS:
+            try:
+                ensure_database_schema()
+            except DatabaseUnavailable:
+                return JSONResponse(status_code=503, content={"detail": "قاعدة البيانات غير مهيأة للخادم.", "code": "database_not_configured"})
+            except SQLAlchemyError as error:
+                print(f"database schema initialization failed: {type(error).__name__}")
+                return JSONResponse(status_code=503, content={"detail": "تعذّر الاتصال بقاعدة البيانات مؤقتًا. حاول مجددًا.", "code": "database_unavailable"})
         return await call_next(request)
     return Response(content=json.dumps({"detail": "Authentication required"}), status_code=401, media_type="application/json")
 
@@ -295,6 +371,21 @@ def stream_data(stream: Stream, clips: list[Clip] | None = None) -> dict:
 
 @app.get("/health")
 def health(): return {"ok": True}
+
+
+@app.get("/health/ready")
+def readiness():
+    """Verify the dependencies required by dashboard and background jobs."""
+    ensure_database_schema()
+    with engine.connect() as connection:
+        connection.execute(text("SELECT 1"))
+    queue_ok = False
+    try:
+        queue_ok = bool(redis_client().ping())
+    except RedisError:
+        pass
+    payload = {"ok": queue_ok, "database": "ready", "queue": "ready" if queue_ok else "unavailable"}
+    return payload if queue_ok else JSONResponse(status_code=503, content=payload)
 
 
 @app.post("/vods/import", status_code=202)
