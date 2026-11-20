@@ -121,6 +121,26 @@ export type CreatorSuggestion = {
   status: "new" | "reviewed";
   created_at: string;
 };
+export type VodStatus = "fetching_metadata" | "downloading" | "remuxing" | "ready" | "failed";
+export type Vod = {
+  id: string;
+  url: string;
+  platform: "twitch" | "kick";
+  quality: string;
+  status: VodStatus;
+  title: string | null;
+  streamer_name: string | null;
+  duration_seconds: number | null;
+  thumbnail_url: string | null;
+  progress: number;
+  download_speed: string | null;
+  eta_seconds: number | null;
+  file_size: number | null;
+  error: string | null;
+  download_url: string | null;
+  created_at: string;
+  updated_at: string;
+};
 const API = (process.env.NEXT_PUBLIC_API_URL || "/api").replace(/\/$/, "");
 
 function errorMessage(status: number, body: unknown): string {
@@ -252,6 +272,12 @@ export const api = {
       method: "POST",
     }),
   streams: () => request<Stream[]>("/streams"),
+  vods: () => request<Vod[]>("/vods"),
+  importVod: (url: string, quality = "best") =>
+    request<Vod>("/vods/import", { method: "POST", body: JSON.stringify({ url, quality }) }),
+  vodStatus: (id: string) => request<Vod>(`/vods/status/${id}`),
+  deleteVod: (id: string) => request<void>(`/vods/${id}`, { method: "DELETE" }),
+  openVodInEditor: (id: string) => request<Stream>(`/vods/${id}/open-in-editor`, { method: "POST" }),
   archiveShorts: () => request<ArchiveShort[]>("/archive/shorts"),
   stream: (id: string) => request<Stream>(`/streams/${id}`),
   preview: (stream_url: string) =>

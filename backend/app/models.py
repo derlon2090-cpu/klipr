@@ -16,6 +16,14 @@ class StreamStatus(str, enum.Enum):
     failed = "failed"
 
 
+class VodStatus(str, enum.Enum):
+    fetching_metadata = "fetching_metadata"
+    downloading = "downloading"
+    remuxing = "remuxing"
+    ready = "ready"
+    failed = "failed"
+
+
 class User(Base):
     __tablename__ = "users"
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -136,6 +144,29 @@ class Stream(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Vod(Base):
+    """An imported, finite Kick or Twitch broadcast kept on the local VOD volume."""
+    __tablename__ = "vods"
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    source_url: Mapped[str] = mapped_column(Text, unique=True)
+    platform: Mapped[str] = mapped_column(String(16), index=True)
+    quality: Mapped[str] = mapped_column(String(32), default="best")
+    status: Mapped[VodStatus] = mapped_column(Enum(VodStatus), default=VodStatus.fetching_metadata, index=True)
+    title: Mapped[str | None] = mapped_column(String(500))
+    streamer_name: Mapped[str | None] = mapped_column(String(160))
+    duration_seconds: Mapped[int | None] = mapped_column(Integer)
+    thumbnail_url: Mapped[str | None] = mapped_column(Text)
+    local_path: Mapped[str | None] = mapped_column(Text)
+    thumbnail_path: Mapped[str | None] = mapped_column(Text)
+    file_size: Mapped[int | None] = mapped_column(Integer)
+    progress: Mapped[float] = mapped_column(Float, default=0)
+    download_speed: Mapped[str | None] = mapped_column(String(64))
+    eta_seconds: Mapped[int | None] = mapped_column(Integer)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class Clip(Base):

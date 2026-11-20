@@ -17,6 +17,7 @@ import {
   Square,
   Trash2,
   Upload,
+  FolderDown,
   WandSparkles,
   KeyRound,
   X,
@@ -30,6 +31,7 @@ import {
   Credentials,
   Stream,
   StreamPreview,
+  Vod,
 } from "@/lib/api";
 import { DashboardSection, Shell } from "@/components/shell";
 import { StatusBadge } from "@/components/status";
@@ -54,6 +56,7 @@ const emptyBranding: Branding = {
 };
 const validSections: DashboardSection[] = [
   "live",
+  "vods",
   "archive",
   "shorts",
   "thumbnail",
@@ -86,6 +89,15 @@ const durationText = (stream: Stream) =>
   stream.started_at && stream.ended_at
     ? `${Math.max(1, Math.round((Date.parse(stream.ended_at) - Date.parse(stream.started_at)) / 60000))} min`
     : "—";
+const vodDuration = (seconds: number | null) => {
+  if (!seconds) return "—";
+  const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60);
+  return h ? `${h}h ${m}m` : `${m}m`;
+};
+const fileSize = (bytes: number | null) => {
+  if (!bytes) return "—";
+  return bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(2)} GB` : `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+};
 
 function SectionTitle({
   eyebrow,
@@ -165,6 +177,10 @@ export default function Dashboard() {
   const [credentials, setCredentials] = useState<Credentials>(emptyCredentials);
   const [sessionInput, setSessionInput] = useState<Record<"kick" | "twitch", string>>({ kick: "", twitch: "" });
   const [sessionBusy, setSessionBusy] = useState<"kick" | "twitch" | null>(null);
+  const [vods, setVods] = useState<Vod[]>([]);
+  const [vodUrl, setVodUrl] = useState("");
+  const [vodQuality, setVodQuality] = useState("best");
+  const [vodBusy, setVodBusy] = useState(false);
 
   const loadCredentials = () => api.credentials().then(setCredentials).catch(() => undefined);
 
@@ -203,12 +219,14 @@ export default function Dashboard() {
       );
     }
   };
+  const loadVods = () => api.vods().then(setVods).catch(() => undefined);
   useEffect(() => {
     const query = new URLSearchParams(window.location.search).get(
       "section",
     ) as DashboardSection | null;
     if (query && validSections.includes(query)) setSection(query);
     load();
+    loadVods();
     loadCredentials();
     Promise.all([api.branding(), api.savedThumbnails()])
       .then(([value, thumbnails]) => {
@@ -223,7 +241,13 @@ export default function Dashboard() {
   useEffect(() => {
     if (section === "suggestions") loadSuggestions();
     if (section === "session") loadCredentials();
+    if (section === "vods") loadVods();
   }, [section]);
+  useEffect(() => {
+    if (section !== "vods" || !vods.some((vod) => !["ready", "failed"].includes(vod.status))) return;
+    const timer = setInterval(loadVods, 2500);
+    return () => clearInterval(timer);
+  }, [section, vods]);
   useEffect(() => {
     const value = url.trim();
     setPreview(null);
@@ -326,6 +350,35 @@ export default function Dashboard() {
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Request failed");
     }
+  };
+  const importVod = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!vodUrl.trim()) return;
+    setVodBusy(true);
+    setMessage("");
+    try {
+      const item = await api.importVod(vodUrl.trim(), vodQuality);
+      setVods((current) => [item, ...current.filter((vod) => vod.id !== item.id)]);
+      setVodUrl("");
+      setMessage(ar ? "بدأ جلب البث المحفوظ في الخلفية." : "VOD import started in the background.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not start VOD import");
+    } finally { setVodBusy(false); }
+  };
+  const openVodInEditor = async (vod: Vod) => {
+    setVodBusy(true);
+    try {
+      const stream = await api.openVodInEditor(vod.id);
+      setStreams((current) => [stream, ...current]);
+      setSelected(stream.id);
+      changeSection("shorts");
+      setMessage(ar ? "أصبح البث جاهزاً في أداة التقطيع." : "The VOD is ready in the clip editor.");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not open VOD in editor"); }
+    finally { setVodBusy(false); }
+  };
+  const removeVod = async (id: string) => {
+    try { await api.deleteVod(id); setVods((current) => current.filter((vod) => vod.id !== id)); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "Could not delete VOD"); }
   };
   const generate = async () => {
     if (!selected) return;
@@ -2183,6 +2236,33 @@ export default function Dashboard() {
     </>
   );
 
+  const vodsView = (
+    <>
+      <SectionTitle
+        eyebrow={ar ? "استيراد محلي" : "Local lossless import"}
+        title={ar ? "مكتبة البثوث المحفوظة" : "VOD Vault"}
+        description={ar ? "ألصق رابط بث محفوظ من Twitch أو Kick. يُحمّل بأعلى جودة متاحة ثم يُعاد تغليفه دون إعادة ترميز ليبقى جاهزاً للتقطيع." : "Paste a saved Twitch or Kick broadcast URL. It downloads at the best available quality and is remuxed without re-encoding for fast editing."}
+        icon={FolderDown}
+      />
+      <form onSubmit={importVod} className="mb-7 rounded-2xl border border-emerald-200 bg-gradient-to-br from-white to-emerald-50 p-5 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row">
+          <div className="relative min-w-0 flex-1">
+            <input value={vodUrl} onChange={(event) => setVodUrl(event.target.value)} dir="ltr" placeholder="https://www.twitch.tv/videos/...  أو  https://kick.com/user/videos/..." className={`${inputClass} mt-0 ps-11`} />
+            <span className={`absolute start-3 top-3.5 text-xs font-black ${/twitch/i.test(vodUrl) ? "text-violet-600" : /kick/i.test(vodUrl) ? "text-lime-600" : "text-slate-400"}`}>{/twitch/i.test(vodUrl) ? "TW" : /kick/i.test(vodUrl) ? "K" : "URL"}</span>
+          </div>
+          <select value={vodQuality} onChange={(event) => setVodQuality(event.target.value)} className="rounded-xl border border-emerald-200 bg-white px-4 text-sm font-bold text-slate-700">
+            <option value="best">{ar ? "أفضل جودة أصلية" : "Best original quality"}</option><option value="1080p">1080p</option><option value="720p">720p</option><option value="480p">480p</option>
+          </select>
+          <button disabled={vodBusy || !vodUrl.trim()} className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 font-black text-white transition hover:bg-emerald-700 disabled:opacity-50"><FolderDown size={18}/>{ar ? "جلب وحفظ البث" : "Fetch & save VOD"}</button>
+        </div>
+        <p className="mt-3 text-xs leading-5 text-emerald-800">{ar ? "يدعم روابط البثوث المحفوظة العامة فقط. لا يجري ضغط الفيديو أو تغيير جودته." : "Public saved-VOD links only. The video is never re-encoded or quality-reduced."}</p>
+      </form>
+      {vods.some((vod) => !["ready", "failed"].includes(vod.status)) && <div className="mb-7 space-y-3">{vods.filter((vod) => !["ready", "failed"].includes(vod.status)).map((vod) => <article key={vod.id} className="overflow-hidden rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm"><div className="flex items-center justify-between gap-3"><div className="min-w-0"><p className="truncate font-black">{vod.title || (ar ? "جارٍ استخراج بيانات البث…" : "Fetching VOD metadata…")}</p><p className="mt-1 text-xs font-bold text-emerald-700">{vod.status === "fetching_metadata" ? (ar ? "استخراج البيانات" : "Fetching metadata") : vod.status === "remuxing" ? (ar ? "تجهيز MP4 سريع التقديم" : "Preparing seekable MP4") : (ar ? "تحميل البث" : "Downloading VOD")}</p></div><span className="text-sm font-black text-emerald-700">{Math.round(vod.progress)}%</span></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-emerald-500 transition-all" style={{width: `${Math.max(3, vod.progress)}%`}} /></div><div className="mt-2 flex gap-4 text-xs text-slate-500"><span>{vod.download_speed || "—"}</span><span>{vod.eta_seconds ? `${vod.eta_seconds}s ETA` : ""}</span></div></article>)}</div>}
+      <div className="mb-3 flex items-center justify-between"><h2 className="text-lg font-black">{ar ? "البثوث الجاهزة" : "Ready broadcasts"}</h2><span className="text-xs font-bold text-slate-400">{vods.filter((vod) => vod.status === "ready").length}</span></div>
+      {vods.length === 0 ? <Empty text={ar ? "لم تُحفظ أي بثوث بعد. ألصق رابط VOD للبدء." : "No saved broadcasts yet. Paste a VOD URL to begin."} /> : <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">{vods.map((vod) => <article key={vod.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="relative aspect-video bg-slate-100">{vod.thumbnail_url ? <img src={vod.thumbnail_url.startsWith("/") ? `${process.env.NEXT_PUBLIC_API_URL || "/api"}${vod.thumbnail_url}` : vod.thumbnail_url} alt="" className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-slate-300"><Film size={36}/></div>}<span className={`absolute end-3 top-3 rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${platformClass(vod.platform)}`}>{vod.platform}</span></div><div className="p-4"><h3 className="truncate font-black">{vod.title || (ar ? "بث غير مسمّى" : "Untitled broadcast")}</h3><p className="mt-1 truncate text-xs text-slate-500">{vod.streamer_name || "—"}</p><div className="mt-3 flex gap-3 text-xs font-bold text-slate-500"><span>{vodDuration(vod.duration_seconds)}</span><span>{fileSize(vod.file_size)}</span></div>{vod.status === "failed" ? <p className="mt-3 text-xs font-bold text-rose-600">{vod.error || (ar ? "فشل الاستيراد" : "Import failed")}</p> : vod.status === "ready" ? <div className="mt-4 grid grid-cols-2 gap-2"><button onClick={() => openVodInEditor(vod)} disabled={vodBusy} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:opacity-50">{ar ? "فتح في المحرر" : "Open in editor"}</button><a href={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${vod.download_url || ""}`} className="rounded-lg border border-slate-200 px-3 py-2 text-center text-xs font-black text-slate-700">MP4 ↓</a><button onClick={() => removeVod(vod.id)} className="col-span-2 rounded-lg px-3 py-2 text-xs font-black text-rose-600 hover:bg-rose-50">{ar ? "حذف" : "Delete"}</button></div> : <p className="mt-3 text-xs font-bold text-slate-400">{ar ? "قيد المعالجة…" : "Processing…"}</p>}</div></article>)}</div>}
+    </>
+  );
+
   const sessionView = (
     <>
       <SectionTitle
@@ -2238,6 +2318,8 @@ export default function Dashboard() {
   const content =
     section === "live"
       ? liveView
+      : section === "vods"
+        ? vodsView
       : section === "archive"
         ? archiveView
         : section === "shorts"

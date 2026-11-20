@@ -13,6 +13,7 @@ import {
   KeyRound,
   Plus,
   Radio,
+  FolderDown,
   Sparkles,
   Trash2,
   X,
@@ -23,6 +24,7 @@ import { LanguageToggle, useLanguage } from "@/components/language";
 
 export type DashboardSection =
   | "live"
+  | "vods"
   | "archive"
   | "shorts"
   | "thumbnail"
@@ -157,6 +159,13 @@ export function Shell({
       icon: Archive,
       ar: "مكتبة الأرشيف",
       en: "VOD Archive",
+      group: "capture",
+    },
+    {
+      id: "vods",
+      icon: FolderDown,
+      ar: "مكتبة البثوث المحفوظة",
+      en: "VOD Vault",
       group: "capture",
     },
     {

@@ -5,20 +5,23 @@ import json
 import secrets
 import time
 import re
+from pathlib import Path
 from html import unescape
 from urllib.request import HTTPRedirectHandler, Request as UrlRequest, build_opener
 from urllib.parse import urlparse, urlunparse
 from uuid import UUID
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, text
 from app.db import Base, SessionLocal, engine
 from app.migrations import apply_migrations
 from app.config import get_settings
-from app.models import ArchiveBranding, Clip, CreatorSuggestion, Notification, SavedThumbnail, Stream, StreamStatus, WatchlistSubscription
+from app.models import ArchiveBranding, Clip, CreatorSuggestion, Notification, SavedThumbnail, Stream, StreamStatus, Vod, VodStatus, WatchlistSubscription
 from app.storage import copy_file, delete_files, presigned_download_url, upload_file
 from app.worker.tasks import WORK_ROOT, active_key, record_stream, redis_client, stop_key, task_key
+from app.worker.vods import VOD_ROOT, import_vod
 from app.api.credentials import router as credentials_router
 
 app = FastAPI(title="Klipr.cloud API", description="On-demand creator stream capture and AI clip studio.", version="0.3.0")
@@ -177,6 +180,9 @@ class CreatorSuggestionPatch(BaseModel):
         return value
 class PasswordRequest(BaseModel): password: str
 class EmailRequest(BaseModel): email: str
+class VodImportRequest(BaseModel):
+    url: str = Field(min_length=12, max_length=2000)
+    quality: str = "best"
 
 WEBHOOK_RE = re.compile(r"^https://(?:discord\.com|discordapp\.com)/api/webhooks/[0-9]+/[A-Za-z0-9_-]+(?:\?.*)?$")
 
@@ -212,6 +218,39 @@ def normalize_live_url(value: str) -> tuple[str, str]:
     path = parsed.path.rstrip("/")
     if not path or path == "/": raise HTTPException(422, "A creator channel path is required")
     return platform, urlunparse(("https", host, path, "", "", ""))
+
+
+def normalize_vod_url(value: str) -> tuple[str, str]:
+    """Permit only public, archived VOD URLs; never pass arbitrary URLs to yt-dlp."""
+    parsed = urlparse(value.strip())
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise HTTPException(422, "Invalid port") from error
+    if parsed.scheme != "https" or parsed.username or parsed.password or port not in {None, 443}:
+        raise HTTPException(422, "A standard HTTPS VOD URL is required")
+    host = (parsed.hostname or "").lower()
+    path = parsed.path.rstrip("/")
+    platform = "twitch" if host in {"twitch.tv", "www.twitch.tv", "m.twitch.tv"} else "kick" if host in {"kick.com", "www.kick.com"} else None
+    is_twitch_vod = platform == "twitch" and bool(re.fullmatch(r"/videos/\d+", path))
+    # Kick has used both /channel/videos/<id> and /channel?clip=<id> forms. Keep imports finite only.
+    is_kick_vod = platform == "kick" and bool(re.fullmatch(r"/[A-Za-z0-9_-]+/videos/[A-Za-z0-9_-]+", path))
+    if not (is_twitch_vod or is_kick_vod):
+        raise HTTPException(422, "Paste a saved Twitch or Kick VOD URL, not a live channel URL")
+    return platform, urlunparse(("https", host, path, "", parsed.query, ""))
+
+
+def vod_data(vod: Vod) -> dict:
+    return {
+        "id": str(vod.id), "url": vod.source_url, "platform": vod.platform, "quality": vod.quality,
+        "status": vod.status.value if isinstance(vod.status, VodStatus) else vod.status,
+        "title": vod.title, "streamer_name": vod.streamer_name, "duration_seconds": vod.duration_seconds,
+        "thumbnail_url": f"/vods/{vod.id}/thumbnail" if vod.thumbnail_path else vod.thumbnail_url,
+        "progress": round(vod.progress or 0, 1), "download_speed": vod.download_speed,
+        "eta_seconds": vod.eta_seconds, "file_size": vod.file_size, "error": vod.error_message,
+        "download_url": f"/vods/{vod.id}/download" if vod.status == VodStatus.ready else None,
+        "created_at": vod.created_at, "updated_at": vod.updated_at,
+    }
 
 def _meta_tag(page: str, property_name: str) -> str | None:
     # Provider page is not trusted markup; return only a bounded, decoded meta value.
@@ -256,6 +295,104 @@ def stream_data(stream: Stream, clips: list[Clip] | None = None) -> dict:
 
 @app.get("/health")
 def health(): return {"ok": True}
+
+
+@app.post("/vods/import", status_code=202)
+def create_vod_import(payload: VodImportRequest):
+    platform, normalized_url = normalize_vod_url(payload.url)
+    quality = payload.quality.strip().lower() or "best"
+    if quality not in {"best", "1080p", "720p", "480p"}:
+        raise HTTPException(422, "quality must be best, 1080p, 720p, or 480p")
+    # yt-dlp format selectors retain the original streams; no transcoding happens here.
+    selector = {"best": "best", "1080p": "best[height<=1080]", "720p": "best[height<=720]", "480p": "best[height<=480]"}[quality]
+    with SessionLocal() as db:
+        existing = db.query(Vod).filter(Vod.source_url == normalized_url).first()
+        if existing and existing.status in {VodStatus.fetching_metadata, VodStatus.downloading, VodStatus.remuxing, VodStatus.ready}:
+            return vod_data(existing)
+        if existing:
+            db.delete(existing)
+            db.commit()
+        vod = Vod(source_url=normalized_url, platform=platform, quality=selector, status=VodStatus.fetching_metadata)
+        db.add(vod); db.commit(); db.refresh(vod)
+        response = vod_data(vod)
+    import_vod.delay(str(vod.id))
+    return response
+
+
+@app.get("/vods")
+def list_vods():
+    with SessionLocal() as db:
+        return [vod_data(item) for item in db.query(Vod).order_by(Vod.created_at.desc()).all()]
+
+
+@app.get("/vods/status/{job_id}")
+def vod_status(job_id: UUID):
+    with SessionLocal() as db:
+        item = db.get(Vod, job_id)
+        if item is None: raise HTTPException(404, "VOD job not found")
+        return vod_data(item)
+
+
+def _vod_file(item: Vod, field: str) -> Path:
+    value = getattr(item, field) or ""
+    path = Path(value).resolve()
+    root = VOD_ROOT.resolve()
+    if root not in path.parents or not path.is_file():
+        raise HTTPException(404, "VOD file is not available")
+    return path
+
+
+@app.get("/vods/{vod_id}/download")
+def download_vod(vod_id: UUID):
+    with SessionLocal() as db:
+        item = db.get(Vod, vod_id)
+        if item is None: raise HTTPException(404, "VOD not found")
+        media = _vod_file(item, "local_path")
+        return FileResponse(media, media_type="video/mp4", filename=f"klipr-vod-{vod_id}.mp4")
+
+
+@app.get("/vods/{vod_id}/thumbnail")
+def vod_thumbnail(vod_id: UUID):
+    with SessionLocal() as db:
+        item = db.get(Vod, vod_id)
+        if item is None: raise HTTPException(404, "VOD not found")
+        thumbnail = _vod_file(item, "thumbnail_path")
+        return FileResponse(thumbnail)
+
+
+@app.post("/vods/{vod_id}/open-in-editor", status_code=201)
+def open_vod_in_editor(vod_id: UUID):
+    """Stage the original VOD for the existing clip worker, only when the user opens it."""
+    with SessionLocal() as db:
+        item = db.get(Vod, vod_id)
+        if item is None: raise HTTPException(404, "VOD not found")
+        media = _vod_file(item, "local_path")
+        stream = Stream(source_url=item.source_url, platform=item.platform, status=StreamStatus.ready,
+                        started_at=item.created_at, ended_at=item.updated_at)
+        db.add(stream); db.flush()
+        key = f"streams/{stream.id}/master.mp4"
+        upload_file(media, key, "video/mp4")
+        stream.master_key = key
+        if item.thumbnail_path:
+            thumb = _vod_file(item, "thumbnail_path")
+            thumb_key = f"streams/{stream.id}/thumbnail{thumb.suffix.lower() or '.jpg'}"
+            upload_file(thumb, thumb_key, "image/jpeg")
+            stream.thumbnail_key = thumb_key
+        db.commit(); db.refresh(stream)
+        return stream_data(stream)
+
+
+@app.delete("/vods/{vod_id}", status_code=204)
+def delete_vod(vod_id: UUID):
+    import shutil
+    with SessionLocal() as db:
+        item = db.get(Vod, vod_id)
+        if item is None: raise HTTPException(404, "VOD not found")
+        directory = (VOD_ROOT / str(vod_id)).resolve()
+        root = VOD_ROOT.resolve()
+        db.delete(item); db.commit()
+    if root in directory.parents and directory.exists():
+        shutil.rmtree(directory)
 
 def _ensure_preset_schema(db):
     # Lazy, idempotent upgrade keeps existing deployments compatible without
