@@ -12,7 +12,7 @@ from urllib.request import HTTPRedirectHandler, Request as UrlRequest, build_ope
 from urllib.parse import urlparse, urlunparse
 from uuid import UUID
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, text
@@ -25,7 +25,7 @@ from app.config import get_settings
 from app.models import ArchiveBranding, Clip, CreatorSuggestion, Notification, SavedThumbnail, Stream, StreamStatus, Vod, VodStatus, WatchlistSubscription
 from app.storage import StorageUnavailable, copy_file, delete_files, presigned_download_url, r2_client, upload_file
 from app.worker.tasks import WORK_ROOT, active_key, record_stream, redis_client, stop_key, task_key
-from app.worker.vods import VOD_ROOT, import_vod
+from app.worker.vods import import_vod
 from app.api.credentials import router as credentials_router
 
 app = FastAPI(title="Klipr.cloud API", description="On-demand creator stream capture and AI clip studio.", version="0.3.0")
@@ -353,7 +353,7 @@ def vod_data(vod: Vod) -> dict:
         "id": str(vod.id), "url": vod.source_url, "platform": vod.platform, "quality": vod.quality,
         "status": vod.status.value if isinstance(vod.status, VodStatus) else vod.status,
         "title": vod.title, "streamer_name": vod.streamer_name, "duration_seconds": vod.duration_seconds,
-        "thumbnail_url": f"/vods/{vod.id}/thumbnail" if vod.thumbnail_path else vod.thumbnail_url,
+        "thumbnail_url": f"/vods/{vod.id}/thumbnail" if vod.thumbnail_key else vod.thumbnail_url,
         "progress": round(vod.progress or 0, 1), "download_speed": vod.download_speed,
         "eta_seconds": vod.eta_seconds, "file_size": vod.file_size, "error": vod.error_message,
         "download_url": f"/vods/{vod.id}/download" if vod.status == VodStatus.ready else None,
@@ -468,22 +468,13 @@ def vod_status(job_id: UUID):
         return vod_data(item)
 
 
-def _vod_file(item: Vod, field: str) -> Path:
-    value = getattr(item, field) or ""
-    path = Path(value).resolve()
-    root = VOD_ROOT.resolve()
-    if root not in path.parents or not path.is_file():
-        raise HTTPException(404, "VOD file is not available")
-    return path
-
-
 @app.get("/vods/{vod_id}/download")
 def download_vod(vod_id: UUID):
     with SessionLocal() as db:
         item = db.get(Vod, vod_id)
         if item is None: raise HTTPException(404, "VOD not found")
-        media = _vod_file(item, "local_path")
-        return FileResponse(media, media_type="video/mp4", filename=f"klipr-vod-{vod_id}.mp4")
+        if not item.storage_key: raise HTTPException(404, "VOD file is not available")
+        return RedirectResponse(presigned_download_url(item.storage_key), status_code=307)
 
 
 @app.get("/vods/{vod_id}/thumbnail")
@@ -491,8 +482,8 @@ def vod_thumbnail(vod_id: UUID):
     with SessionLocal() as db:
         item = db.get(Vod, vod_id)
         if item is None: raise HTTPException(404, "VOD not found")
-        thumbnail = _vod_file(item, "thumbnail_path")
-        return FileResponse(thumbnail)
+        if not item.thumbnail_key: raise HTTPException(404, "VOD thumbnail is not available")
+        return RedirectResponse(presigned_download_url(item.thumbnail_key), status_code=307)
 
 
 @app.post("/vods/{vod_id}/open-in-editor", status_code=201)
@@ -501,17 +492,16 @@ def open_vod_in_editor(vod_id: UUID):
     with SessionLocal() as db:
         item = db.get(Vod, vod_id)
         if item is None: raise HTTPException(404, "VOD not found")
-        media = _vod_file(item, "local_path")
+        if not item.storage_key: raise HTTPException(409, "VOD file is not ready")
         stream = Stream(source_url=item.source_url, platform=item.platform, status=StreamStatus.ready,
                         started_at=item.created_at, ended_at=item.updated_at)
         db.add(stream); db.flush()
         key = f"streams/{stream.id}/master.mp4"
-        upload_file(media, key, "video/mp4")
+        copy_file(item.storage_key, key)
         stream.master_key = key
-        if item.thumbnail_path:
-            thumb = _vod_file(item, "thumbnail_path")
-            thumb_key = f"streams/{stream.id}/thumbnail{thumb.suffix.lower() or '.jpg'}"
-            upload_file(thumb, thumb_key, "image/jpeg")
+        if item.thumbnail_key:
+            thumb_key = f"streams/{stream.id}/thumbnail.jpg"
+            copy_file(item.thumbnail_key, thumb_key)
             stream.thumbnail_key = thumb_key
         db.commit(); db.refresh(stream)
         return stream_data(stream)
@@ -519,15 +509,12 @@ def open_vod_in_editor(vod_id: UUID):
 
 @app.delete("/vods/{vod_id}", status_code=204)
 def delete_vod(vod_id: UUID):
-    import shutil
     with SessionLocal() as db:
         item = db.get(Vod, vod_id)
         if item is None: raise HTTPException(404, "VOD not found")
-        directory = (VOD_ROOT / str(vod_id)).resolve()
-        root = VOD_ROOT.resolve()
+        storage_keys = [key for key in (item.storage_key, item.thumbnail_key) if key]
         db.delete(item); db.commit()
-    if root in directory.parents and directory.exists():
-        shutil.rmtree(directory)
+    delete_files(storage_keys)
 
 def _ensure_preset_schema(db):
     # Lazy, idempotent upgrade keeps existing deployments compatible without

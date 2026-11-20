@@ -11,6 +11,7 @@ from celery import shared_task
 
 from app.db import SessionLocal
 from app.models import Vod, VodStatus
+from app.storage import upload_file
 
 VOD_ROOT = Path("/var/lib/klipr/vods")
 _PROGRESS = re.compile(r"^download:([\d.]+)%\|([^|]*)\|([^|]*)$")
@@ -102,8 +103,16 @@ def import_vod(self, vod_id: str) -> None:
         _update(identifier, status=VodStatus.remuxing, progress=99, download_speed=None, eta_seconds=None)
         subprocess.run(["ffmpeg", "-y", "-i", str(source), "-map", "0", "-c", "copy", "-movflags", "+faststart", str(final)],
                        check=True, capture_output=True, text=True, timeout=3600)
-        _update(identifier, status=VodStatus.ready, progress=100, local_path=str(final), file_size=final.stat().st_size,
-                download_speed=None, eta_seconds=None)
+        storage_key = f"vods/{vod_id}/vod.mp4"
+        upload_file(final, storage_key, "video/mp4")
+        thumbnail_key = None
+        if thumbnail_path:
+            thumbnail_key = f"vods/{vod_id}/thumbnail.jpg"
+            upload_file(Path(thumbnail_path), thumbnail_key, "image/jpeg")
+        _update(identifier, status=VodStatus.ready, progress=100, storage_key=storage_key,
+                thumbnail_key=thumbnail_key, local_path=None, thumbnail_path=None,
+                file_size=final.stat().st_size, download_speed=None, eta_seconds=None)
+        shutil.rmtree(directory, ignore_errors=True)
     except Exception as error:
         _update(identifier, status=VodStatus.failed, error_message=str(error)[:2000], download_speed=None, eta_seconds=None)
         raise

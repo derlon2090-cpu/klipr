@@ -147,7 +147,7 @@ class Stream(Base):
 
 
 class Vod(Base):
-    """An imported, finite Kick or Twitch broadcast kept on the local VOD volume."""
+    """An imported, finite Kick or Twitch broadcast kept in object storage."""
     __tablename__ = "vods"
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     source_url: Mapped[str] = mapped_column(Text, unique=True)
@@ -160,6 +160,8 @@ class Vod(Base):
     thumbnail_url: Mapped[str | None] = mapped_column(Text)
     local_path: Mapped[str | None] = mapped_column(Text)
     thumbnail_path: Mapped[str | None] = mapped_column(Text)
+    storage_key: Mapped[str | None] = mapped_column(Text)
+    thumbnail_key: Mapped[str | None] = mapped_column(Text)
     file_size: Mapped[int | None] = mapped_column(Integer)
     progress: Mapped[float] = mapped_column(Float, default=0)
     download_speed: Mapped[str | None] = mapped_column(String(64))
