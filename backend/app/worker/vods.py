@@ -18,7 +18,7 @@ from app.models import SessionCredential, Vod, VodStatus
 from app.storage import upload_file
 
 VOD_ROOT = Path("/var/lib/klipr/vods")
-_PROGRESS = re.compile(r"^download:([\d.]+)%\|([^|]*)\|([^|]*)$")
+_PROGRESS = re.compile(r"^download:\s*([\d.]+)%\|([^|]*)\|([^|]*)$")
 _KICK_VIDEO = re.compile(r"^https?://(?:www\.)?kick\.com/[^/]+/videos/([0-9a-f-]{36})(?:[/?#]|$)", re.I)
 _KICK_API = "https://web.kick.com/api/v1"
 
@@ -204,7 +204,7 @@ def import_vod(self, vod_id: str) -> None:
         session_options, cookie_file, request_headers = _session_download_options(platform, directory)
         download_url = _kick_playback_url(source_url, request_headers) if platform == "kick" else source_url
         command = [
-            "yt-dlp", "--force-ipv4", "--no-playlist", "--newline", "--no-part", "--concurrent-fragments", "8",
+            "yt-dlp", "--force-ipv4", "--no-playlist", "--newline", "--no-colors", "--no-part", "--concurrent-fragments", "8",
             "--merge-output-format", "mp4", "--format", format_selector,
             "--progress-template", "download:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s",
             "--output", template,
@@ -234,8 +234,13 @@ def import_vod(self, vod_id: str) -> None:
         source = max(candidates, key=lambda path: path.stat().st_size)
         final = directory / "vod.mp4"
         _update(identifier, status=VodStatus.remuxing, progress=99, download_speed=None, eta_seconds=None)
-        subprocess.run(["ffmpeg", "-y", "-i", str(source), "-map", "0", "-c", "copy", "-movflags", "+faststart", str(final)],
-                       check=True, capture_output=True, text=True, timeout=3600)
+        if source.suffix.lower() == ".mp4":
+            # yt-dlp already remuxed the HLS fragments to a fast-start MP4;
+            # renaming avoids copying multi-gigabyte VODs through FFmpeg twice.
+            source.replace(final)
+        else:
+            subprocess.run(["ffmpeg", "-y", "-i", str(source), "-map", "0", "-c", "copy", "-movflags", "+faststart", str(final)],
+                           check=True, capture_output=True, text=True, timeout=3600)
         # Prefer platform artwork, but never make the VOD card depend on it.
         thumbnail_path = thumbnail_path or _extract_best_frame(final, directory)
         storage_key = f"vods/{vod_id}/vod.mp4"

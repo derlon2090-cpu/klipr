@@ -19,7 +19,17 @@ def celery_redis_url(url: str) -> str:
 
 broker_url = celery_redis_url(settings.redis_url)
 celery_app = Celery("klipr", broker=broker_url, backend=broker_url)
-celery_app.conf.update(task_track_started=True, task_serializer="json", accept_content=["json"], result_serializer="json")
+celery_app.conf.update(
+    task_track_started=True,
+    task_serializer="json",
+    accept_content=["json"],
+    result_serializer="json",
+    # VOD downloads can run for many minutes. Keep them recoverable when a
+    # worker is rebuilt or restarted; yt-dlp resumes from its .ytdl state.
+    task_acks_late=True,
+    task_reject_on_worker_lost=True,
+    worker_prefetch_multiplier=1,
+)
 celery_app.conf.imports = ("app.worker.tasks", "app.worker.highlights", "app.worker.vods", "app.worker.watcher")
 celery_app.conf.beat_schedule = {
     "check-creator-watchlist-every-minute": {
