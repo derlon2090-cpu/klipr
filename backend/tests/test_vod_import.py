@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from app.main import _vod_is_stale
 from app.models import VodStatus
+from app.worker.celery_app import celery_redis_url
 from app.worker.vods import _session_download_options, extract_vod_metadata
 
 
@@ -48,6 +49,13 @@ def test_raw_kick_cookie_is_not_prefixed_twice(tmp_path):
         options, cookie_file = _session_download_options("kick", tmp_path)
     assert options == ["--add-headers", "Cookie:kick_session=secret"]
     assert cookie_file is None
+
+
+def test_celery_requires_verified_tls_for_managed_redis():
+    assert celery_redis_url("rediss://user:secret@example.test:6380/0") == (
+        "rediss://user:secret@example.test:6380/0?ssl_cert_reqs=required"
+    )
+    assert celery_redis_url("redis://localhost:6379/0") == "redis://localhost:6379/0"
 
 
 def test_vod_job_is_marked_stale_after_twenty_minutes():

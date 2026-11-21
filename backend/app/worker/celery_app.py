@@ -1,9 +1,24 @@
 from celery import Celery
 from celery.signals import heartbeat_sent, worker_ready, worker_shutdown
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
 from app.config import get_settings
 
 settings = get_settings()
-celery_app = Celery("klipr", broker=settings.redis_url, backend=settings.redis_url)
+
+
+def celery_redis_url(url: str) -> str:
+    """Require certificate verification for managed TLS Redis connections."""
+    if not url.startswith("rediss://"):
+        return url
+    parts = urlsplit(url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query.setdefault("ssl_cert_reqs", "required")
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+broker_url = celery_redis_url(settings.redis_url)
+celery_app = Celery("klipr", broker=broker_url, backend=broker_url)
 celery_app.conf.update(task_track_started=True, task_serializer="json", accept_content=["json"], result_serializer="json")
 celery_app.conf.imports = ("app.worker.tasks", "app.worker.highlights", "app.worker.watcher")
 celery_app.conf.beat_schedule = {
