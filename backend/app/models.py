@@ -56,6 +56,9 @@ class ArchiveBranding(Base):
     default_left_vod_id: Mapped[UUID | None] = mapped_column(nullable=True)
     default_right_vod_id: Mapped[UUID | None] = mapped_column(nullable=True)
     auto_trim_ads: Mapped[bool] = mapped_column(Boolean, default=False)
+    overlay_logo_key: Mapped[str | None] = mapped_column(Text)
+    overlay_creator_name: Mapped[str | None] = mapped_column(String(120))
+    overlay_position: Mapped[str] = mapped_column(String(24), default="top-right")
 
 
 class SessionCredential(Base):
@@ -141,6 +144,9 @@ class Stream(Base):
     outro_duration_seconds: Mapped[int] = mapped_column(default=15)
     left_vod_id: Mapped[UUID | None] = mapped_column(nullable=True)
     right_vod_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    overlay_logo_key: Mapped[str | None] = mapped_column(Text)
+    overlay_creator_name: Mapped[str | None] = mapped_column(String(120))
+    overlay_position: Mapped[str] = mapped_column(String(24), default="top-right")
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

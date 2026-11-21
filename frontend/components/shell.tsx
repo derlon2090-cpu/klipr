@@ -13,6 +13,7 @@ import {
   Plus,
   Radio,
   FolderDown,
+  BadgeCheck,
   Trash2,
   X,
 } from "lucide-react";
@@ -26,7 +27,8 @@ export type DashboardSection =
   | "archive"
   | "shorts"
   | "suggestions"
-  | "session";
+  | "session"
+  | "presets";
 
 export function Shell({
   children,
@@ -165,6 +167,13 @@ export function Shell({
       group: "capture",
     },
     {
+      id: "presets",
+      icon: BadgeCheck,
+      ar: "المحفوظات التعديلية",
+      en: "Editing Presets",
+      group: "capture",
+    },
+    {
       id: "shorts",
       icon: Clapperboard,
       ar: "صانع الشورتات",
@@ -196,7 +205,7 @@ export function Shell({
     window.location.assign("/");
   };
   const groups = [
-    { id: "capture", ar: "البث والأرشيف", en: "CAPTURE & ARCHIVE" },
+    { id: "capture", ar: "المكتبة والأصول", en: "LIBRARY & ASSETS" },
     { id: "studio", ar: "أدوات الإنتاج", en: "CREATOR STUDIO" },
     { id: "system", ar: "الربط والنظام", en: "SYSTEM" },
   ] as const;

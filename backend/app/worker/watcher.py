@@ -135,12 +135,15 @@ def trigger_delayed_auto_record(notification_id: str, channel_url: str) -> None:
                 layout_mode="center", enable_end_screen=branding.enable_end_screen, remove_music=branding.remove_music,
                 archive_channel_name=branding.archive_channel_name, archive_tagline=branding.archive_tagline,
                 outro_duration_seconds=branding.outro_duration_seconds, left_vod_id=branding.default_left_vod_id,
-                right_vod_id=branding.default_right_vod_id)
+                right_vod_id=branding.default_right_vod_id, overlay_creator_name=branding.overlay_creator_name,
+                overlay_position=branding.overlay_position)
             db.add(stream); db.flush()
             if branding.default_thumbnail_key and branding.use_default_thumbnail:
                 suffix = Path(branding.default_thumbnail_key).suffix or ".png"; stream.thumbnail_key = f"streams/{stream.id}/custom-thumbnail{suffix}"; copy_file(branding.default_thumbnail_key, stream.thumbnail_key)
             if branding.archive_logo_key:
                 suffix = Path(branding.archive_logo_key).suffix or ".png"; stream.archive_logo_key = f"streams/{stream.id}/archive-logo{suffix}"; copy_file(branding.archive_logo_key, stream.archive_logo_key)
+            if branding.overlay_logo_key:
+                suffix = Path(branding.overlay_logo_key).suffix or ".png"; stream.overlay_logo_key = f"streams/{stream.id}/overlay-logo{suffix}"; copy_file(branding.overlay_logo_key, stream.overlay_logo_key)
             if branding.default_short_thumbnail_key:
                 suffix = Path(branding.default_short_thumbnail_key).suffix or ".png"; stream.short_thumbnail_key = f"streams/{stream.id}/short-thumbnail{suffix}"; copy_file(branding.default_short_thumbnail_key, stream.short_thumbnail_key)
             if not _reserve_auto_slot(str(stream.id)):

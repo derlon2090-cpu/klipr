@@ -53,6 +53,10 @@ const emptyBranding: Branding = {
   default_short_thumbnail_url: null,
   default_left_vod_id: null,
   default_right_vod_id: null,
+  overlay_logo_key: null,
+  overlay_logo_url: null,
+  overlay_creator_name: "",
+  overlay_position: "top-right",
 };
 const validSections: DashboardSection[] = [
   "live",
@@ -61,6 +65,7 @@ const validSections: DashboardSection[] = [
   "shorts",
   "suggestions",
   "session",
+  "presets",
 ];
 const platformClass = (platform: string) =>
   platform === "twitch"
@@ -427,6 +432,8 @@ export default function Dashboard() {
         default_thumbnail_url: _thumbnailUrl,
         default_short_thumbnail_key: _shortThumbnailKey,
         default_short_thumbnail_url: _shortThumbnailUrl,
+        overlay_logo_key: _overlayLogoKey,
+        overlay_logo_url: _overlayLogoUrl,
         ...payload
       } = branding;
       setBranding(await api.saveBranding(payload));
@@ -477,6 +484,24 @@ export default function Dashboard() {
       setMessage(e instanceof Error ? e.message : "Request failed");
     }
   };
+  const uploadOverlayLogo = async (file?: File) => {
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024 || !["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+      setMessage(ar ? "اختر شعار PNG أو JPG أو WebP بحجم أقل من 5MB." : "Choose a PNG, JPG or WebP logo under 5MB.");
+      return;
+    }
+    try {
+      const result = await api.uploadOverlayLogo(file);
+      setBranding((current) => ({ ...current, overlay_logo_key: result.overlay_logo_key, overlay_logo_url: result.overlay_logo_url || URL.createObjectURL(file) }));
+      setMessage(ar ? "تم رفع شعار القالب." : "Preset logo uploaded.");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Upload failed"); }
+  };
+  const deleteOverlayLogo = async () => {
+    try {
+      await api.deleteOverlayLogo();
+      setBranding((current) => ({ ...current, overlay_logo_key: null, overlay_logo_url: null }));
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Delete failed"); }
+  };
   const persistPreset = async (patch: Partial<Branding>) => {
     const next = { ...branding, ...patch };
     setBranding(next);
@@ -487,6 +512,8 @@ export default function Dashboard() {
       default_thumbnail_url: _thumbnailUrl,
       default_short_thumbnail_key: _shortThumbnailKey,
       default_short_thumbnail_url: _shortThumbnailUrl,
+      overlay_logo_key: _overlayLogoKey,
+      overlay_logo_url: _overlayLogoUrl,
       ...payload
     } = next;
     try {
@@ -2298,6 +2325,31 @@ export default function Dashboard() {
     </>
   );
   const hasExpiredSession = Object.values(credentials).some((item) => item.status === "expired");
+  const presetsView = (
+    <>
+      <SectionTitle icon={CheckCircle2} eyebrow={ar ? "المكتبة والأصول" : "LIBRARY & ASSETS"} title={ar ? "المحفوظات التعديلية" : "Editing presets"} description={ar ? "احفظ ختم علامتك ليُدمج تلقائياً في كل شورت جديد من البثوث المحفوظة." : "Save a brand overlay that is burned into every newly exported Short."} />
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <section className="rounded-3xl border border-emerald-100 bg-white p-6 shadow-sm">
+          <div className="mx-auto flex aspect-[9/16] max-w-[330px] items-start bg-[linear-gradient(155deg,#0f172a,#155e50_52%,#0f172a)] p-5 shadow-2xl" style={{ justifyContent: branding.overlay_position === "top-right" ? "flex-end" : branding.overlay_position === "top-left" ? "flex-start" : "center", alignItems: branding.overlay_position === "bottom-center" ? "flex-end" : "flex-start" }}>
+            <div className="flex max-w-full items-center gap-3 rounded-full border-4 border-emerald-400 bg-white/95 py-2 pe-5 ps-2 shadow-lg">
+              <div className="grid size-14 shrink-0 place-items-center overflow-hidden rounded-full bg-emerald-600 text-xs font-black text-white">
+                {branding.overlay_logo_url ? <img src={branding.overlay_logo_url} alt="Preset logo" className="h-full w-full object-cover" /> : "K"}
+              </div>
+              <span className="truncate text-lg font-black text-slate-900">{branding.overlay_creator_name || (ar ? "اسم المشهور" : "Creator name")}</span>
+            </div>
+          </div>
+          <p className="mt-4 text-center text-xs font-bold text-slate-500">1080 × 1920 · {ar ? "معاينة حية للختم" : "live overlay preview"}</p>
+        </section>
+        <aside className="space-y-5 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <label className="block text-sm font-black">{ar ? "اسم المشهور / الستريمر" : "Creator / streamer name"}<input value={branding.overlay_creator_name || ""} onChange={(event) => setBranding({ ...branding, overlay_creator_name: event.target.value })} maxLength={120} placeholder="@drb7h" className={inputClass} /></label>
+          <div><p className="text-sm font-black">{ar ? "الشعار" : "Logo"}</p><div className="mt-3 flex gap-2"><label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-300 px-3 py-2.5 text-xs font-black"><Upload size={15}/>{ar ? "رفع / تغيير" : "Upload / change"}<input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => uploadOverlayLogo(event.target.files?.[0])}/></label>{branding.overlay_logo_key && <button onClick={deleteOverlayLogo} className="rounded-xl px-3 text-xs font-black text-rose-600">{ar ? "إزالة" : "Remove"}</button>}</div><p className="mt-2 text-[11px] text-slate-400">PNG / JPG / WebP · 5MB</p></div>
+          <label className="block text-sm font-black">{ar ? "موقع الختم" : "Overlay position"}<select value={branding.overlay_position} onChange={(event) => setBranding({ ...branding, overlay_position: event.target.value as Branding["overlay_position"] })} className={inputClass}><option value="top-right">{ar ? "أعلى اليمين" : "Top right"}</option><option value="top-left">{ar ? "أعلى اليسار" : "Top left"}</option><option value="bottom-center">{ar ? "أسفل المنتصف" : "Bottom center"}</option></select></label>
+          <button onClick={saveBranding} disabled={savingBrand} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3.5 font-black text-white disabled:opacity-50"><Check size={17}/>{savingBrand ? (ar ? "جارٍ الحفظ…" : "Saving…") : (ar ? "حفظ المحفوظات التعديلية" : "Save editing preset")}</button>
+          <p className="rounded-xl bg-emerald-50 p-3 text-xs leading-5 text-emerald-800">{ar ? "سيُلتقط هذا الإعداد مع كل بث جديد ويُدمج تلقائياً في التصدير النهائي." : "This preset is snapshotted with each new stream and burned into its final export."}</p>
+        </aside>
+      </div>
+    </>
+  );
   const content =
     section === "live"
       ? liveView
@@ -2305,6 +2357,8 @@ export default function Dashboard() {
         ? vodsView
       : section === "archive"
         ? archiveView
+        : section === "presets"
+          ? presetsView
         : section === "shorts"
           ? shortsView
           : section === "session" ? sessionView : suggestionsView;

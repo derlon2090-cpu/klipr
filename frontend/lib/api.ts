@@ -64,6 +64,10 @@ export type Branding = {
   default_short_thumbnail_url?: string | null;
   default_left_vod_id: string | null;
   default_right_vod_id: string | null;
+  overlay_logo_key: string | null;
+  overlay_logo_url?: string | null;
+  overlay_creator_name: string | null;
+  overlay_position: "top-right" | "top-left" | "bottom-center";
 };
 export type SavedThumbnail = {
   id: string;
@@ -332,6 +336,8 @@ export const api = {
       | "default_thumbnail_url"
       | "default_short_thumbnail_key"
       | "default_short_thumbnail_url"
+      | "overlay_logo_key"
+      | "overlay_logo_url"
     >,
   ) =>
     request<Branding>("/branding", {
@@ -347,6 +353,12 @@ export const api = {
     );
   },
   deleteLogo: () => request<void>("/branding/logo", { method: "DELETE" }),
+  uploadOverlayLogo: (file: File) => {
+    const body = new FormData();
+    body.append("file", file);
+    return upload<{ overlay_logo_key: string; overlay_logo_url?: string }>("/branding/overlay-logo", body);
+  },
+  deleteOverlayLogo: () => request<void>("/branding/overlay-logo", { method: "DELETE" }),
   uploadThumbnail: (file: File, kind: "vod" | "short") => {
     const body = new FormData();
     body.append("file", file);

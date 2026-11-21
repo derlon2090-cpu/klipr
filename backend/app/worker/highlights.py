@@ -127,6 +127,41 @@ def add_intro_thumbnail(video: Path, thumbnail: Path, destination: Path) -> None
     """Show the saved 9:16 cover over the opening 0.8 seconds."""
     run(["ffmpeg", "-y", "-i", str(video), "-loop", "1", "-i", str(thumbnail), "-filter_complex", "[1:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[cover];[0:v][cover]overlay=0:0:enable='lt(t,0.8)'[v]", "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-c:a", "copy", "-shortest", "-movflags", "+faststart", str(destination)])
 
+def add_editing_overlay(video: Path, logo: Path | None, creator_name: str | None, position: str, destination: Path) -> None:
+    """Burn a compact pill identity overlay into a vertical export.
+
+    The logo is deliberately snapshot with the stream, so later preset edits do
+    not change exports that are already queued.
+    """
+    if not creator_name and not logo:
+        shutil.copy2(video, destination)
+        return
+    from PIL import Image, ImageDraw, ImageFont
+    card = destination.with_suffix(".overlay.png")
+    width, height = 470, 150
+    art = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(art)
+    emerald = (16, 185, 129, 255)
+    draw.rounded_rectangle((4, 4, width - 4, height - 4), radius=73, fill=(255, 255, 255, 242), outline=emerald, width=8)
+    if logo and logo.exists():
+        image = Image.open(logo).convert("RGBA")
+        image.thumbnail((112, 112), Image.Resampling.LANCZOS)
+        circle = Image.new("L", image.size, 0)
+        ImageDraw.Draw(circle).ellipse((0, 0, image.width, image.height), fill=255)
+        art.alpha_composite(image, (22 + (112 - image.width) // 2, 19 + (112 - image.height) // 2), (0, 0, image.width, image.height))
+    else:
+        draw.ellipse((24, 24, 126, 126), fill=emerald)
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 35)
+    except OSError:
+        font = ImageFont.load_default()
+    label = (creator_name or "Klipr").strip()[:40]
+    draw.text((145, 54), label, fill=(15, 23, 42, 255), font=font, stroke_width=0)
+    art.save(card)
+    positions = {"top-right": "W-w-42:42", "top-left": "42:42", "bottom-center": "(W-w)/2:H-h-240"}
+    run(["ffmpeg", "-y", "-i", str(video), "-i", str(card), "-filter_complex", f"[0:v][1:v]overlay={positions.get(position, positions['top-right'])}[v]", "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-c:a", "copy", "-movflags", "+faststart", str(destination)])
+    card.unlink(missing_ok=True)
+
 @shared_task
 def process_stream_highlights(stream_id: str, max_clips: int = 3) -> None:
     sid = UUID(stream_id)
@@ -137,6 +172,7 @@ def process_stream_highlights(stream_id: str, max_clips: int = 3) -> None:
         master_key = stream.master_key
         layout_mode, webhook_url = stream.layout_mode, stream.discord_webhook_url
         target_seconds, headline, embed_intro, platform, short_thumbnail_key, remove_music = stream.target_clip_duration, stream.custom_headline or "", stream.embed_intro_cover, stream.platform, stream.short_thumbnail_key, stream.remove_music
+        overlay_logo_key, overlay_creator_name, overlay_position = stream.overlay_logo_key, stream.overlay_creator_name, stream.overlay_position
     job_dir = WORK_ROOT / stream_id / "highlight-processing"
     vod, wav = job_dir / "master.mp4", job_dir / "audio.wav"
     _set_status(sid, StreamStatus.processing)
@@ -146,6 +182,10 @@ def process_stream_highlights(stream_id: str, max_clips: int = 3) -> None:
         if embed_intro and short_thumbnail_key:
             intro_thumbnail = job_dir / f"intro-thumbnail{Path(short_thumbnail_key).suffix or '.png'}"
             download_file(short_thumbnail_key, intro_thumbnail)
+        overlay_logo = None
+        if overlay_logo_key:
+            overlay_logo = job_dir / f"overlay-logo{Path(overlay_logo_key).suffix or '.png'}"
+            download_file(overlay_logo_key, overlay_logo)
         extract_audio(vod, wav)
         highlights = analyze_highlights(wav, job_dir / "candidate-audio", target_seconds, max_clips)
         with SessionLocal() as db:
@@ -165,6 +205,9 @@ def process_stream_highlights(stream_id: str, max_clips: int = 3) -> None:
                     cover_output = job_dir / f"highlight-{index}-cover.mp4"
                     add_intro_thumbnail(raw_output, intro_thumbnail, cover_output)
                     branded_source = cover_output
+                overlay_output = job_dir / f"highlight-{index}-overlay.mp4"
+                add_editing_overlay(branded_source, overlay_logo, overlay_creator_name, overlay_position, overlay_output)
+                branded_source = overlay_output
                 from .branding import prepend_intro, render_sponsor_intro
                 bumper = job_dir / "klipr-sponsor-intro.mp4"
                 if not bumper.exists():

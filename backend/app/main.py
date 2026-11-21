@@ -252,6 +252,15 @@ class BrandingRequest(BaseModel):
     archive_tagline: str | None = None
     default_left_vod_id: UUID | None = None
     default_right_vod_id: UUID | None = None
+    overlay_creator_name: str | None = Field(default=None, max_length=120)
+    overlay_position: str = "top-right"
+
+    @field_validator("overlay_position")
+    @classmethod
+    def valid_overlay_position(cls, value: str) -> str:
+        if value not in {"top-right", "top-left", "bottom-center"}:
+            raise ValueError("overlay_position must be top-right, top-left, or bottom-center")
+        return value
 class WatchlistRequest(BaseModel):
     channel_url: str
     auto_record: bool = True
@@ -568,8 +577,10 @@ def open_vod_in_editor(vod_id: UUID):
         item = db.get(Vod, vod_id)
         if item is None: raise HTTPException(404, "VOD not found")
         if not item.storage_key: raise HTTPException(409, "VOD file is not ready")
+        branding = _branding(db)
         stream = Stream(source_url=item.source_url, platform=item.platform, status=StreamStatus.ready,
-                        started_at=item.created_at, ended_at=item.updated_at)
+                        started_at=item.created_at, ended_at=item.updated_at,
+                        overlay_creator_name=branding.overlay_creator_name, overlay_position=branding.overlay_position)
         db.add(stream); db.flush()
         key = f"streams/{stream.id}/master.mp4"
         copy_file(item.storage_key, key)
@@ -578,6 +589,10 @@ def open_vod_in_editor(vod_id: UUID):
             thumb_key = f"streams/{stream.id}/thumbnail.jpg"
             copy_file(item.thumbnail_key, thumb_key)
             stream.thumbnail_key = thumb_key
+        if branding.overlay_logo_key:
+            suffix = Path(branding.overlay_logo_key).suffix or ".png"
+            stream.overlay_logo_key = f"streams/{stream.id}/overlay-logo{suffix}"
+            copy_file(branding.overlay_logo_key, stream.overlay_logo_key)
         db.commit(); db.refresh(stream)
         return stream_data(stream)
 
@@ -609,6 +624,12 @@ def _ensure_preset_schema(db):
         db.execute(text("ALTER TABLE archive_branding ADD COLUMN IF NOT EXISTS remove_music BOOLEAN NOT NULL DEFAULT FALSE"))
         db.execute(text("ALTER TABLE archive_branding ADD COLUMN IF NOT EXISTS auto_trim_ads BOOLEAN NOT NULL DEFAULT FALSE"))
         db.execute(text("ALTER TABLE streams ADD COLUMN IF NOT EXISTS remove_music BOOLEAN NOT NULL DEFAULT FALSE"))
+        db.execute(text("ALTER TABLE archive_branding ADD COLUMN IF NOT EXISTS overlay_logo_key TEXT"))
+        db.execute(text("ALTER TABLE archive_branding ADD COLUMN IF NOT EXISTS overlay_creator_name VARCHAR(120)"))
+        db.execute(text("ALTER TABLE archive_branding ADD COLUMN IF NOT EXISTS overlay_position VARCHAR(24) NOT NULL DEFAULT 'top-right'"))
+        db.execute(text("ALTER TABLE streams ADD COLUMN IF NOT EXISTS overlay_logo_key TEXT"))
+        db.execute(text("ALTER TABLE streams ADD COLUMN IF NOT EXISTS overlay_creator_name VARCHAR(120)"))
+        db.execute(text("ALTER TABLE streams ADD COLUMN IF NOT EXISTS overlay_position VARCHAR(24) NOT NULL DEFAULT 'top-right'"))
         db.execute(text("CREATE TABLE IF NOT EXISTS saved_thumbnails (id UUID PRIMARY KEY, kind VARCHAR(16) NOT NULL, storage_key TEXT NOT NULL UNIQUE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), CONSTRAINT saved_thumbnails_kind_check CHECK (kind IN ('vod', 'short')))"))
         db.execute(text("CREATE INDEX IF NOT EXISTS ix_saved_thumbnails_kind ON saved_thumbnails(kind)"))
         db.execute(text("ALTER TABLE clips ADD COLUMN IF NOT EXISTS viral_score INTEGER NOT NULL DEFAULT 0"))
@@ -678,7 +699,7 @@ def _branding(db):
 @app.get("/branding")
 def get_branding():
     with SessionLocal() as db:
-        item = _branding(db); return {"enable_end_screen":item.enable_end_screen,"remove_music":item.remove_music,"auto_trim_ads":item.auto_trim_ads,"use_default_thumbnail":item.use_default_thumbnail,"outro_duration_seconds":item.outro_duration_seconds,"archive_channel_name":item.archive_channel_name,"archive_tagline":item.archive_tagline,"archive_logo_key":item.archive_logo_key,"archive_logo_url":presigned_download_url(item.archive_logo_key) if item.archive_logo_key else None,"default_thumbnail_key":item.default_thumbnail_key,"default_thumbnail_url":presigned_download_url(item.default_thumbnail_key) if item.default_thumbnail_key else None,"default_short_thumbnail_key":item.default_short_thumbnail_key,"default_short_thumbnail_url":presigned_download_url(item.default_short_thumbnail_key) if item.default_short_thumbnail_key else None,"default_left_vod_id":item.default_left_vod_id,"default_right_vod_id":item.default_right_vod_id}
+        item = _branding(db); return {"enable_end_screen":item.enable_end_screen,"remove_music":item.remove_music,"auto_trim_ads":item.auto_trim_ads,"use_default_thumbnail":item.use_default_thumbnail,"outro_duration_seconds":item.outro_duration_seconds,"archive_channel_name":item.archive_channel_name,"archive_tagline":item.archive_tagline,"archive_logo_key":item.archive_logo_key,"archive_logo_url":presigned_download_url(item.archive_logo_key) if item.archive_logo_key else None,"default_thumbnail_key":item.default_thumbnail_key,"default_thumbnail_url":presigned_download_url(item.default_thumbnail_key) if item.default_thumbnail_key else None,"default_short_thumbnail_key":item.default_short_thumbnail_key,"default_short_thumbnail_url":presigned_download_url(item.default_short_thumbnail_key) if item.default_short_thumbnail_key else None,"default_left_vod_id":item.default_left_vod_id,"default_right_vod_id":item.default_right_vod_id,"overlay_logo_key":item.overlay_logo_key,"overlay_logo_url":presigned_download_url(item.overlay_logo_key) if item.overlay_logo_key else None,"overlay_creator_name":item.overlay_creator_name,"overlay_position":item.overlay_position}
 @app.put("/branding")
 def put_branding(payload: BrandingRequest):
     if not 10 <= payload.outro_duration_seconds <= 20: raise HTTPException(422,"outro_duration_seconds must be between 10 and 20")
@@ -708,6 +729,33 @@ async def upload_branding_logo(file: UploadFile = File(...)):
 def delete_branding_logo():
     with SessionLocal() as db:
         item = _branding(db); old = item.archive_logo_key; item.archive_logo_key = None; db.commit()
+    if old: delete_files([old])
+
+@app.post("/branding/overlay-logo")
+async def upload_overlay_logo(file: UploadFile = File(...)):
+    """Upload the transparent logo used by the editing-preset overlay."""
+    data = await file.read()
+    is_png, is_jpg, is_webp = data.startswith(b"\x89PNG\r\n\x1a\n"), data.startswith(b"\xff\xd8\xff"), data.startswith(b"RIFF") and data[8:12] == b"WEBP"
+    if len(data) > 5 * 1024 * 1024 or not (is_png or is_jpg or is_webp):
+        raise HTTPException(422, "Overlay logo must be a PNG, JPG, or WebP under 5MB")
+    import tempfile
+    suffix = ".png" if is_png else ".jpg" if is_jpg else ".webp"
+    key = f"branding/overlay-logo_{secrets.token_hex(12)}{suffix}"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temp:
+        temp.write(data); path = Path(temp.name)
+    try:
+        upload_file(path, key, "image/png" if suffix == ".png" else "image/jpeg")
+        with SessionLocal() as db:
+            item = _branding(db); old = item.overlay_logo_key; item.overlay_logo_key = key; db.commit()
+        if old: delete_files([old])
+    finally:
+        path.unlink(missing_ok=True)
+    return {"overlay_logo_key": key, "overlay_logo_url": presigned_download_url(key)}
+
+@app.delete("/branding/overlay-logo", status_code=204)
+def delete_overlay_logo():
+    with SessionLocal() as db:
+        item = _branding(db); old = item.overlay_logo_key; item.overlay_logo_key = None; db.commit()
     if old: delete_files([old])
 
 @app.post("/branding/thumbnail")
@@ -893,7 +941,7 @@ def record(payload: RecordRequest, request: Request):
     try:
         with SessionLocal() as db:
             branding = _branding(db)
-            stream = Stream(channel_id=None, source_url=normalized, platform=platform, status=StreamStatus.queued, layout_mode=layout_mode, discord_webhook_url=webhook, custom_headline=(payload.custom_headline or "").strip()[:160] or None, enable_end_screen=branding.enable_end_screen, remove_music=branding.remove_music if payload.remove_music is None else payload.remove_music, archive_channel_name=branding.archive_channel_name, archive_tagline=branding.archive_tagline, outro_duration_seconds=branding.outro_duration_seconds, left_vod_id=branding.default_left_vod_id, right_vod_id=branding.default_right_vod_id)
+            stream = Stream(channel_id=None, source_url=normalized, platform=platform, status=StreamStatus.queued, layout_mode=layout_mode, discord_webhook_url=webhook, custom_headline=(payload.custom_headline or "").strip()[:160] or None, enable_end_screen=branding.enable_end_screen, remove_music=branding.remove_music if payload.remove_music is None else payload.remove_music, archive_channel_name=branding.archive_channel_name, archive_tagline=branding.archive_tagline, outro_duration_seconds=branding.outro_duration_seconds, left_vod_id=branding.default_left_vod_id, right_vod_id=branding.default_right_vod_id, overlay_creator_name=branding.overlay_creator_name, overlay_position=branding.overlay_position)
             db.add(stream); db.flush()
             if branding.default_thumbnail_key and branding.use_default_thumbnail:
                 suffix = Path(branding.default_thumbnail_key).suffix or ".png"
@@ -903,6 +951,10 @@ def record(payload: RecordRequest, request: Request):
                 suffix = Path(branding.archive_logo_key).suffix or ".png"
                 stream.archive_logo_key = f"streams/{stream.id}/archive-logo{suffix}"
                 copy_file(branding.archive_logo_key, stream.archive_logo_key)
+            if branding.overlay_logo_key:
+                suffix = Path(branding.overlay_logo_key).suffix or ".png"
+                stream.overlay_logo_key = f"streams/{stream.id}/overlay-logo{suffix}"
+                copy_file(branding.overlay_logo_key, stream.overlay_logo_key)
             if branding.default_short_thumbnail_key:
                 suffix = Path(branding.default_short_thumbnail_key).suffix or ".png"
                 stream.short_thumbnail_key = f"streams/{stream.id}/short-thumbnail{suffix}"
