@@ -15,7 +15,7 @@ from urllib.request import HTTPRedirectHandler, Request as UrlRequest, build_ope
 from urllib.parse import urlparse, urlunparse
 from uuid import UUID, uuid4
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, text
@@ -911,6 +911,27 @@ def delete_saved_thumbnail(thumbnail_id: UUID):
         if item.default_short_thumbnail_key == key: item.default_short_thumbnail_key = None
         db.delete(thumbnail); db.commit()
     delete_files([key])
+
+
+@app.get("/branding/thumbnails/{thumbnail_id}/download")
+def download_saved_thumbnail(thumbnail_id: UUID):
+    """Stream a saved cover through Klipr so browser CORS never blocks download."""
+    with SessionLocal() as db:
+        item = db.get(SavedThumbnail, thumbnail_id)
+        if item is None:
+            raise HTTPException(404, "Saved thumbnail not found")
+        key = item.storage_key
+    suffix = Path(key).suffix.lower()
+    content_type = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}.get(suffix, "application/octet-stream")
+    try:
+        body = r2_client().get_object(Bucket=get_settings().r2_bucket, Key=key)["Body"]
+    except (BotoCoreError, ClientError) as error:
+        raise HTTPException(502, "Thumbnail storage is temporarily unavailable") from error
+    return StreamingResponse(
+        body.iter_chunks(chunk_size=1024 * 1024),
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="klipr-{item.kind}-thumbnail{suffix}"'},
+    )
 
 @app.delete("/branding/thumbnail", status_code=204)
 def delete_branding_thumbnail(kind: str = "vod"):

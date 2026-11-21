@@ -655,24 +655,6 @@ export default function Dashboard() {
       setBusy(false);
     }
   };
-  const downloadThumbnail = async () => {
-    const url = thumbFormat === "short" ? branding.default_short_thumbnail_url : branding.default_thumbnail_url;
-    if (!url) return;
-    try {
-      const blob = await fetch(url).then((response) => {
-        if (!response.ok) throw new Error("Download failed");
-        return response.blob();
-      });
-      const localUrl = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = localUrl;
-      link.download = `klipr-${thumbFormat}-thumbnail.png`;
-      link.click();
-      URL.revokeObjectURL(localUrl);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : (ar ? "تعذّر تنزيل الثامبنيل." : "Could not download the thumbnail."));
-    }
-  };
   const deleteThumbnail = async (kind: "vod" | "short" = thumbFormat) => {
     try {
       await api.deleteThumbnail(kind);
@@ -1742,10 +1724,10 @@ export default function Dashboard() {
                   ? "Save vertical Short cover"
                   : "Save regular VOD cover"}
           </button>
-          {(thumbFormat === "short" ? branding.default_short_thumbnail_url : branding.default_thumbnail_url) && (
-            <button onClick={downloadThumbnail} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 font-black text-emerald-800 hover:bg-emerald-100">
+          {savedThumbnails.find((item) => item.kind === thumbFormat && item.selected) && (
+            <a href={`${process.env.NEXT_PUBLIC_API_URL || "/api"}/branding/thumbnails/${savedThumbnails.find((item) => item.kind === thumbFormat && item.selected)?.id}/download`} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 font-black text-emerald-800 hover:bg-emerald-100">
               <Download size={17}/>{ar ? "تنزيل الثامبنيل بجودة كاملة" : "Download full-quality thumbnail"}
-            </button>
+            </a>
           )}
           {(thumbFormat === "short"
             ? branding.default_short_thumbnail_key
