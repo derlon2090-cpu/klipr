@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 from uuid import UUID, uuid4
-from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 from .db import Base
@@ -168,7 +168,7 @@ class Vod(Base):
     thumbnail_path: Mapped[str | None] = mapped_column(Text)
     storage_key: Mapped[str | None] = mapped_column(Text)
     thumbnail_key: Mapped[str | None] = mapped_column(Text)
-    file_size: Mapped[int | None] = mapped_column(Integer)
+    file_size: Mapped[int | None] = mapped_column(BigInteger)
     progress: Mapped[float] = mapped_column(Float, default=0)
     download_speed: Mapped[str | None] = mapped_column(String(64))
     eta_seconds: Mapped[int | None] = mapped_column(Integer)
