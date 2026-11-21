@@ -6,6 +6,7 @@ import secrets
 import time
 import re
 import threading
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from html import unescape
 from urllib.request import HTTPRedirectHandler, Request as UrlRequest, build_opener
@@ -22,10 +23,11 @@ from redis.exceptions import RedisError
 from app.db import Base, SessionLocal, engine
 from app.migrations import apply_migrations
 from app.config import get_settings
-from app.models import ArchiveBranding, Clip, CreatorSuggestion, Notification, SavedThumbnail, Stream, StreamStatus, Vod, VodStatus, WatchlistSubscription
+from app.models import ArchiveBranding, Clip, CreatorSuggestion, Notification, SavedThumbnail, SessionCredential, Stream, StreamStatus, Vod, VodStatus, WatchlistSubscription
 from app.storage import StorageUnavailable, copy_file, delete_files, presigned_download_url, r2_client, upload_file
 from app.worker.tasks import WORK_ROOT, active_key, record_stream, redis_client, stop_key, task_key
-from app.worker.vods import import_vod
+from app.worker.celery_app import WORKER_HEARTBEAT_KEY
+from app.worker.vods import extract_vod_metadata, import_vod
 from app.api.credentials import router as credentials_router
 
 app = FastAPI(title="Klipr.cloud API", description="On-demand creator stream capture and AI clip studio.", version="0.3.0")
@@ -360,6 +362,24 @@ def vod_data(vod: Vod) -> dict:
         "created_at": vod.created_at, "updated_at": vod.updated_at,
     }
 
+
+def _vod_is_stale(vod: Vod) -> bool:
+    active = {VodStatus.fetching_metadata, VodStatus.downloading, VodStatus.remuxing}
+    if vod.status not in active or not vod.updated_at:
+        return False
+    updated = vod.updated_at if vod.updated_at.tzinfo else vod.updated_at.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - updated > timedelta(minutes=20)
+
+
+def _expire_stale_vod(db, vod: Vod) -> None:
+    if not _vod_is_stale(vod):
+        return
+    vod.status = VodStatus.failed
+    vod.error_message = "توقفت مهمة الاستخراج لأن عامل المعالجة لم يكن متصلاً. أعد المحاولة الآن."
+    vod.download_speed = None
+    vod.eta_seconds = None
+    db.commit()
+
 def _meta_tag(page: str, property_name: str) -> str | None:
     # Provider page is not trusted markup; return only a bounded, decoded meta value.
     match = re.search(r'<meta[^>]+(?:property|name)=["\']' + re.escape(property_name) + r'["\'][^>]+content=["\']([^"\']+)', page, re.I)
@@ -412,8 +432,11 @@ def readiness():
     with engine.connect() as connection:
         connection.execute(text("SELECT 1"))
     queue_ok = False
+    worker_ok = False
     try:
-        queue_ok = bool(redis_client().ping())
+        client = redis_client()
+        queue_ok = bool(client.ping())
+        worker_ok = bool(client.exists(WORKER_HEARTBEAT_KEY))
     except RedisError:
         pass
     storage_ok = False
@@ -422,11 +445,12 @@ def readiness():
         storage_ok = True
     except (StorageUnavailable, BotoCoreError, ClientError):
         pass
-    ready = queue_ok and storage_ok
+    ready = queue_ok and storage_ok and worker_ok
     payload = {
         "ok": ready,
         "database": "ready",
         "queue": "ready" if queue_ok else "unavailable",
+        "worker": "ready" if worker_ok else "unavailable",
         "storage": "ready" if storage_ok else "unavailable",
     }
     return payload if ready else JSONResponse(status_code=503, content=payload)
@@ -440,24 +464,68 @@ def create_vod_import(payload: VodImportRequest):
         raise HTTPException(422, "quality must be best, 1080p, 720p, or 480p")
     # yt-dlp format selectors retain the original streams; no transcoding happens here.
     selector = {"best": "best", "1080p": "best[height<=1080]", "720p": "best[height<=720]", "480p": "best[height<=480]"}[quality]
+    try:
+        info = extract_vod_metadata(normalized_url)
+    except Exception as error:
+        raise HTTPException(502, "تعذّر استخراج بيانات البث. تأكد أن الرابط عام ومتاح.") from error
+    title = str(info.get("title") or "Untitled VOD")[:500]
+    uploader = str(info.get("uploader") or info.get("channel") or info.get("uploader_id") or "")[:160]
+    duration = int(info["duration"]) if info.get("duration") else None
+    thumbnail_url = info.get("thumbnail")
+    if info.get("availability") == "subscriber_only":
+        with SessionLocal() as db:
+            credential = db.get(SessionCredential, platform)
+            has_session = bool(credential and credential.status == "active" and credential.session_encrypted)
+            if has_session and credential.expires_at:
+                expires_at = credential.expires_at if credential.expires_at.tzinfo else credential.expires_at.replace(tzinfo=timezone.utc)
+                has_session = expires_at > datetime.now(timezone.utc)
+        if not has_session:
+            raise HTTPException(403, "هذا البث مخصص لمشتركي Kick. أضف جلسة Kick صالحة من قسم الجلسة ثم أعد المحاولة.")
+    try:
+        worker_online = bool(redis_client().exists(WORKER_HEARTBEAT_KEY))
+    except RedisError:
+        worker_online = False
+    if not worker_online:
+        raise HTTPException(503, "عامل الاستخراج غير متصل حالياً. لم يتم إنشاء مهمة معلّقة.")
     with SessionLocal() as db:
         existing = db.query(Vod).filter(Vod.source_url == normalized_url).first()
-        if existing and existing.status in {VodStatus.fetching_metadata, VodStatus.downloading, VodStatus.remuxing, VodStatus.ready}:
+        if existing and existing.status == VodStatus.ready:
             return vod_data(existing)
-        if existing:
-            db.delete(existing)
-            db.commit()
-        vod = Vod(source_url=normalized_url, platform=platform, quality=selector, status=VodStatus.fetching_metadata)
-        db.add(vod); db.commit(); db.refresh(vod)
+        if existing and existing.status in {VodStatus.fetching_metadata, VodStatus.downloading, VodStatus.remuxing} and not _vod_is_stale(existing):
+            return vod_data(existing)
+        vod = existing or Vod(source_url=normalized_url, platform=platform)
+        vod.quality = selector
+        vod.status = VodStatus.downloading
+        vod.title = title
+        vod.streamer_name = uploader
+        vod.duration_seconds = duration
+        vod.thumbnail_url = thumbnail_url
+        vod.progress = 1
+        vod.error_message = None
+        vod.download_speed = None
+        vod.eta_seconds = None
+        if existing is None: db.add(vod)
+        db.commit(); db.refresh(vod)
         response = vod_data(vod)
-    import_vod.delay(str(vod.id))
+    try:
+        import_vod.delay(str(vod.id))
+    except Exception as error:
+        with SessionLocal() as db:
+            failed = db.get(Vod, vod.id)
+            if failed:
+                failed.status = VodStatus.failed
+                failed.error_message = "تعذّر إرسال مهمة الاستخراج إلى الطابور."
+                db.commit()
+        raise HTTPException(503, "تعذّر بدء الاستخراج حالياً.") from error
     return response
 
 
 @app.get("/vods")
 def list_vods():
     with SessionLocal() as db:
-        return [vod_data(item) for item in db.query(Vod).order_by(Vod.created_at.desc()).all()]
+        items = db.query(Vod).order_by(Vod.created_at.desc()).all()
+        for item in items: _expire_stale_vod(db, item)
+        return [vod_data(item) for item in items]
 
 
 @app.get("/vods/status/{job_id}")
@@ -465,6 +533,7 @@ def vod_status(job_id: UUID):
     with SessionLocal() as db:
         item = db.get(Vod, job_id)
         if item is None: raise HTTPException(404, "VOD job not found")
+        _expire_stale_vod(db, item)
         return vod_data(item)
 
 

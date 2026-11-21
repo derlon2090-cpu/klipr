@@ -1,20 +1,26 @@
 """Finite VOD imports. Commands are argument arrays: URLs never enter a shell."""
 import json
+import os
 import re
 import shutil
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.request import Request, urlopen
 from uuid import UUID
 
+import requests
 from celery import shared_task
 
+from app.core.crypto import decrypt_secret
 from app.db import SessionLocal
-from app.models import Vod, VodStatus
+from app.models import SessionCredential, Vod, VodStatus
 from app.storage import upload_file
 
 VOD_ROOT = Path("/var/lib/klipr/vods")
 _PROGRESS = re.compile(r"^download:([\d.]+)%\|([^|]*)\|([^|]*)$")
+_KICK_VIDEO = re.compile(r"^https?://(?:www\.)?kick\.com/[^/]+/videos/([0-9a-f-]{36})(?:[/?#]|$)", re.I)
+_KICK_API = "https://web.kick.com/api/v1"
 
 
 def _update(vod_id: UUID, **fields: object) -> None:
@@ -27,12 +33,80 @@ def _update(vod_id: UUID, **fields: object) -> None:
         db.commit()
 
 
-def _metadata(url: str) -> dict:
+def _kick_metadata(url: str, timeout: int) -> dict | None:
+    """Use Kick's small JSON endpoints so metadata does not wait on yt-dlp."""
+    match = _KICK_VIDEO.match(url)
+    if not match:
+        return None
+    video_id = match.group(1)
+    headers = {"User-Agent": "Mozilla/5.0 Klipr.cloud/1.0"}
+    payload = {
+        "video_player": {"player": {}},
+        "video_session": {},
+        "user_session": {"non_personalised_ads": True},
+    }
+    playback = requests.post(
+        f"{_KICK_API}/stream/{video_id}/playback",
+        json=payload,
+        headers=headers,
+        timeout=timeout,
+    )
+    playback.raise_for_status()
+    session = playback.json().get("video_session") or {}
+    creator_id = session.get("creator_id")
+    video: dict = {}
+    if creator_id:
+        listing = requests.get(f"{_KICK_API}/channels/{creator_id}/videos", headers=headers, timeout=timeout)
+        listing.raise_for_status()
+        video = next((item for item in listing.json().get("data", []) if item.get("id") == video_id), {})
+    channel = video.get("channel") or {}
+    thumbnail = video.get("thumbnail") or {}
+    status = video.get("status")
+    return {
+        "id": video_id,
+        "title": video.get("title") or session.get("video_title"),
+        "uploader": channel.get("username") or session.get("video_series"),
+        "channel": channel.get("slug"),
+        "duration": video.get("duration") or session.get("video_duration"),
+        "thumbnail": thumbnail.get("src"),
+        "availability": "subscriber_only" if status == "sub_only" else "public",
+    }
+
+
+def extract_vod_metadata(url: str, timeout: int = 45) -> dict:
+    """Fetch the small metadata document without downloading media."""
+    kick = _kick_metadata(url, timeout)
+    if kick is not None:
+        return kick
     completed = subprocess.run(
-        ["yt-dlp", "--dump-single-json", "--skip-download", "--no-playlist", url],
-        capture_output=True, text=True, check=True, timeout=120,
+        ["yt-dlp", "--force-ipv4", "--dump-single-json", "--skip-download", "--no-playlist", url],
+        capture_output=True, text=True, check=True, timeout=timeout,
     )
     return json.loads(completed.stdout)
+
+
+def _session_download_options(platform: str, directory: Path) -> tuple[list[str], Path | None]:
+    """Convert an encrypted Session Vault entry into private yt-dlp flags."""
+    if platform not in {"kick", "twitch"}:
+        return [], None
+    with SessionLocal() as db:
+        credential = db.get(SessionCredential, platform)
+        if not credential or credential.status != "active" or not credential.session_encrypted:
+            return [], None
+        if credential.expires_at and credential.expires_at <= datetime.now(timezone.utc):
+            credential.status = "expired"
+            db.commit()
+            return [], None
+        plaintext = decrypt_secret(credential.session_encrypted)
+    if "\t" in plaintext:
+        cookie_file = directory / f"{platform}_cookies.txt"
+        cookie_file.write_text(plaintext, encoding="utf-8")
+        os.chmod(cookie_file, 0o600)
+        return ["--cookies", str(cookie_file)], cookie_file
+    if plaintext.lower().startswith("bearer "):
+        return ["--add-headers", f"Authorization:{plaintext}"], None
+    cookie_header = plaintext if "=" in plaintext else f"kick_session={plaintext}"
+    return ["--add-headers", f"Cookie:{cookie_header}"], None
 
 
 def _save_thumbnail(url: str | None, directory: Path) -> str | None:
@@ -56,28 +130,36 @@ def import_vod(self, vod_id: str) -> None:
         vod = db.get(Vod, identifier)
         if vod is None:
             return
-        source_url, quality = vod.source_url, vod.quality
+        source_url, quality, platform = vod.source_url, vod.quality, vod.platform
+        title, uploader = vod.title, vod.streamer_name
+        duration, thumbnail_url = vod.duration_seconds, vod.thumbnail_url
     directory = VOD_ROOT / vod_id
     directory.mkdir(parents=True, exist_ok=True)
+    cookie_file: Path | None = None
     try:
-        _update(identifier, status=VodStatus.fetching_metadata, progress=0, error_message=None)
-        info = _metadata(source_url)
-        title = str(info.get("title") or "Untitled VOD")[:500]
-        uploader = str(info.get("uploader") or info.get("channel") or info.get("uploader_id") or "")[:160]
-        duration = int(info["duration"]) if info.get("duration") else None
-        thumbnail_path = _save_thumbnail(info.get("thumbnail"), directory)
+        if not title:
+            _update(identifier, status=VodStatus.fetching_metadata, progress=0, error_message=None)
+            info = extract_vod_metadata(source_url)
+            title = str(info.get("title") or "Untitled VOD")[:500]
+            uploader = str(info.get("uploader") or info.get("channel") or info.get("uploader_id") or "")[:160]
+            duration = int(info["duration"]) if info.get("duration") else None
+            thumbnail_url = info.get("thumbnail")
+        thumbnail_path = _save_thumbnail(thumbnail_url, directory)
         _update(identifier, title=title, streamer_name=uploader, duration_seconds=duration,
-                thumbnail_url=info.get("thumbnail"), thumbnail_path=thumbnail_path,
-                status=VodStatus.downloading)
+                thumbnail_url=thumbnail_url, thumbnail_path=thumbnail_path,
+                status=VodStatus.downloading, progress=1)
 
         template = str(directory / "source.%(ext)s")
         format_selector = "best" if quality == "best" else quality
+        session_options, cookie_file = _session_download_options(platform, directory)
         command = [
-            "yt-dlp", "--no-playlist", "--newline", "--no-part", "--concurrent-fragments", "8",
+            "yt-dlp", "--force-ipv4", "--no-playlist", "--newline", "--no-part", "--concurrent-fragments", "8",
             "--merge-output-format", "mp4", "--format", format_selector,
             "--progress-template", "download:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s",
-            "--output", template, source_url,
+            "--output", template,
         ]
+        command.extend(session_options)
+        command.append(source_url)
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                    text=True, bufsize=1)
         assert process.stdout is not None
@@ -116,3 +198,6 @@ def import_vod(self, vod_id: str) -> None:
     except Exception as error:
         _update(identifier, status=VodStatus.failed, error_message=str(error)[:2000], download_speed=None, eta_seconds=None)
         raise
+    finally:
+        if cookie_file:
+            cookie_file.unlink(missing_ok=True)
