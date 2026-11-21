@@ -33,6 +33,7 @@ import {
   Stream,
   StreamPreview,
   StudioRender,
+  SmartThumbnail,
   Vod,
 } from "@/lib/api";
 import { DashboardSection, Shell } from "@/components/shell";
@@ -202,6 +203,11 @@ export default function Dashboard() {
   const [studioExportQuality, setStudioExportQuality] = useState<"original" | "4k">("original");
   const [studioRender, setStudioRender] = useState<StudioRender | null>(null);
   const [studioBusy, setStudioBusy] = useState(false);
+  const [smartVodId, setSmartVodId] = useState("");
+  const [smartPlatform, setSmartPlatform] = useState<SmartThumbnail["platform"]>("youtube");
+  const [smartStyle, setSmartStyle] = useState<SmartThumbnail["frame_style"]>("bold");
+  const [smartItems, setSmartItems] = useState<SmartThumbnail[]>([]);
+  const [smartBusy, setSmartBusy] = useState(false);
 
   const loadCredentials = () => api.credentials().then(setCredentials).catch(() => undefined);
 
@@ -269,6 +275,14 @@ export default function Dashboard() {
     const timer = window.setInterval(() => api.studioRender(studioRender.id).then(setStudioRender).catch(() => undefined), 2500);
     return () => window.clearInterval(timer);
   }, [studioRender?.id, studioRender?.status]);
+  useEffect(() => {
+    if (!smartItems.some((item) => item.status === "queued" || item.status === "processing")) return;
+    const timer = window.setInterval(() => {
+      Promise.all(smartItems.map((item) => api.smartThumbnail(item.id)))
+        .then(setSmartItems).catch(() => undefined);
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [smartItems]);
   useEffect(() => {
     if (section !== "vods" || !vods.some((vod) => !["ready", "failed"].includes(vod.status))) return;
     const timer = setInterval(loadVods, 2500);
@@ -1667,6 +1681,16 @@ export default function Dashboard() {
             : "Create a 16:9 VOD cover or a vertical 9:16 cover for Shorts."
         }
       />
+      <section className="mb-6 rounded-3xl border border-violet-200 bg-[linear-gradient(135deg,#f5f3ff,#ffffff)] p-6 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="text-xl font-black">{ar ? "صانع الثامبنيل بالذكاء الاصطناعي" : "AI Thumbnail Studio"}</h2><p className="mt-1 text-sm text-slate-600">{ar ? "حلّل البث المختار واحصل على 3 لقطات مع عناوين عربية قابلة للتنزيل." : "Analyze a saved VOD and get three downloadable, captioned moments."}</p></div><span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-black text-violet-700">OpenAI Vision + DeepSeek</span></div>
+        <div className="mt-5 grid gap-3 lg:grid-cols-4">
+          <select value={smartVodId} onChange={(event) => setSmartVodId(event.target.value)} className={inputClass}><option value="">{ar ? "اختر بثاً محفوظاً" : "Choose a saved VOD"}</option>{vods.filter((vod) => vod.status === "ready").map((vod) => <option key={vod.id} value={vod.id}>{vod.title || "Untitled VOD"}</option>)}</select>
+          <select value={smartPlatform} onChange={(event) => setSmartPlatform(event.target.value as SmartThumbnail["platform"])} className={inputClass}><option value="youtube">YouTube · 16:9 · 1280×720</option><option value="tiktok">TikTok · 9:16 · 1080×1920</option><option value="shorts">YouTube Shorts · 9:16</option><option value="reels">Reels · 9:16</option><option value="x">X / Twitter · 16:9 · 1920×1080</option><option value="kick">Kick · 16:9 · 1920×1080</option></select>
+          <select value={smartStyle} onChange={(event) => setSmartStyle(event.target.value as SmartThumbnail["frame_style"])} className={inputClass}><option value="bold">{ar ? "إطار حماسي عالي التباين" : "Bold high-contrast frame"}</option><option value="clean">{ar ? "إطار نظيف" : "Clean platform frame"}</option><option value="none">{ar ? "بدون إطار" : "No frame"}</option></select>
+          <button disabled={smartBusy || !smartVodId} onClick={async () => { setSmartBusy(true); setMessage(""); try { setSmartItems(await api.createSmartThumbnails(smartVodId, smartPlatform, smartStyle)); setMessage(ar ? "بدأ تحليل البث — ستظهر ثلاث لقطات هنا عند اكتماله." : "Analysis started — three suggestions will appear here."); } catch (error) { setMessage(error instanceof Error ? error.message : "Could not start thumbnail analysis"); } finally { setSmartBusy(false); } }} className="mt-2 inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-3 font-black text-white hover:bg-violet-700 disabled:opacity-50"><WandSparkles size={18}/>{smartBusy ? (ar ? "جارٍ البدء…" : "Starting…") : (ar ? "تحليل البث وصناعة الثامبنيل" : "Analyze & generate")}</button>
+        </div>
+        {smartItems.length > 0 && <div className="mt-6 grid gap-4 md:grid-cols-3">{smartItems.map((item, index) => <article key={item.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white"><div className="aspect-video bg-slate-100">{item.image_url ? <img src={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${item.image_url}`} alt={item.headline || "AI thumbnail"} className="h-full w-full object-cover"/> : <div className="grid h-full place-items-center text-sm font-bold text-slate-400">{item.status === "failed" ? (ar ? "فشل التوليد" : "Generation failed") : `${Math.round(item.progress)}%`}</div>}</div><div className="p-4"><p className="font-black">{item.headline || (ar ? "يجري استخراج أفضل لقطة…" : "Finding the best frame…")}</p>{item.context && <p className="mt-2 line-clamp-2 text-xs text-slate-500">{item.context}</p>}{item.error && <p className="mt-2 text-xs text-rose-600">{item.error}</p>}{item.image_url && <a href={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${item.image_url}`} download className="mt-4 inline-flex items-center gap-2 text-sm font-black text-violet-700"><Download size={16}/>{ar ? "تنزيل JPG" : "Download JPG"}</a>}</div></article>)}</div>}
+      </section>
       <div className="grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
         <aside className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div>

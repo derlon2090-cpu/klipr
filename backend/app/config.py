@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     watcher_proxy_url: str | None = None
     ollama_url: str | None = None
     ollama_model: str = "qwen3:1.7b"
+    openai_api_key: str = ""
+    deepseek_api_key: str = ""
 
 
 @lru_cache

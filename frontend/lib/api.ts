@@ -159,6 +159,20 @@ export type StudioRender = {
   download_url: string | null;
   created_at: string | null;
 };
+export type SmartThumbnail = {
+  id: string;
+  vod_id: string;
+  status: "queued" | "processing" | "ready" | "failed";
+  progress: number;
+  platform: "youtube" | "tiktok" | "shorts" | "reels" | "x" | "kick";
+  frame_style: "bold" | "clean" | "none";
+  timestamp_seconds: number | null;
+  headline: string | null;
+  context: string | null;
+  error: string | null;
+  image_url: string | null;
+  created_at: string | null;
+};
 const API = (process.env.NEXT_PUBLIC_API_URL || "/api").replace(/\/$/, "");
 
 function errorMessage(status: number, body: unknown): string {
@@ -306,6 +320,9 @@ export const api = {
     return upload<StudioRender>("/studio/renders", body);
   },
   studioRender: (id: string) => request<StudioRender>(`/studio/renders/${id}`),
+  createSmartThumbnails: (vod_id: string, platform: SmartThumbnail["platform"], frame_style: SmartThumbnail["frame_style"]) =>
+    request<SmartThumbnail[]>("/smart-thumbnails", { method: "POST", body: JSON.stringify({ vod_id, platform, frame_style }) }),
+  smartThumbnail: (id: string) => request<SmartThumbnail>(`/smart-thumbnails/${id}`),
   archiveShorts: () => request<ArchiveShort[]>("/archive/shorts"),
   stream: (id: string) => request<Stream>(`/streams/${id}`),
   preview: (stream_url: string) =>

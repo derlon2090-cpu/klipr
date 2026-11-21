@@ -30,7 +30,7 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
 )
-celery_app.conf.imports = ("app.worker.tasks", "app.worker.highlights", "app.worker.vods", "app.worker.watcher", "app.worker.studio")
+celery_app.conf.imports = ("app.worker.tasks", "app.worker.highlights", "app.worker.vods", "app.worker.watcher", "app.worker.studio", "app.worker.smart_thumbnails")
 celery_app.conf.beat_schedule = {
     "check-creator-watchlist-every-minute": {
         "task": "app.worker.watcher.check_watchlist_streams",

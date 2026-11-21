@@ -25,7 +25,7 @@ from redis.exceptions import RedisError
 from app.db import Base, SessionLocal, engine
 from app.migrations import apply_migrations
 from app.config import get_settings
-from app.models import ArchiveBranding, Clip, CreatorSuggestion, Notification, SavedThumbnail, SessionCredential, Stream, StreamStatus, StudioRender, Vod, VodStatus, WatchlistSubscription
+from app.models import ArchiveBranding, Clip, CreatorSuggestion, Notification, SavedThumbnail, SessionCredential, SmartThumbnail, Stream, StreamStatus, StudioRender, Vod, VodStatus, WatchlistSubscription
 from app.storage import StorageUnavailable, copy_file, delete_files, presigned_download_url, r2_client, upload_file
 from app.worker.tasks import WORK_ROOT, active_key, redis_client, stop_key, task_key
 from app.worker.celery_app import WORKER_HEARTBEAT_KEY, celery_app
@@ -307,10 +307,41 @@ class VodImportRequest(BaseModel):
     quality: str = "original"
 
 
+class SmartThumbnailRequest(BaseModel):
+    vod_id: UUID
+    platform: str = "youtube"
+    frame_style: str = "bold"
+
+    @field_validator("platform")
+    @classmethod
+    def validate_thumbnail_platform(cls, value: str) -> str:
+        value = value.strip().lower()
+        if value not in {"youtube", "tiktok", "shorts", "reels", "x", "kick"}:
+            raise ValueError("Unsupported thumbnail platform")
+        return value
+
+    @field_validator("frame_style")
+    @classmethod
+    def validate_frame_style(cls, value: str) -> str:
+        value = value.strip().lower()
+        if value not in {"bold", "clean", "none"}:
+            raise ValueError("Unsupported frame style")
+        return value
+
+
 def studio_render_data(item: StudioRender) -> dict:
     return {"id": str(item.id), "vod_id": str(item.vod_id), "status": item.status,
             "progress": item.progress, "export_quality": item.export_quality, "error": item.error_message,
             "download_url": f"/studio/renders/{item.id}/download" if item.status == "ready" and item.output_path else None,
+            "created_at": item.created_at.isoformat() if item.created_at else None}
+
+
+def smart_thumbnail_data(item: SmartThumbnail) -> dict:
+    return {"id": str(item.id), "vod_id": str(item.vod_id), "status": item.status,
+            "progress": round(item.progress or 0, 1), "platform": item.platform,
+            "frame_style": item.frame_style, "timestamp_seconds": item.timestamp_seconds,
+            "headline": item.headline, "context": item.context, "error": item.error_message,
+            "image_url": f"/smart-thumbnails/{item.id}/image" if item.status == "ready" and item.output_path else None,
             "created_at": item.created_at.isoformat() if item.created_at else None}
 
 
@@ -710,6 +741,40 @@ def download_studio_render(render_id: UUID):
         output = Path(item.output_path)
     if not output.is_file(): raise HTTPException(404, "The final render file is unavailable")
     return FileResponse(output, media_type="video/mp4", filename=f"klipr-studio-{render_id}.mp4")
+
+
+@app.post("/smart-thumbnails", status_code=202)
+def create_smart_thumbnails(payload: SmartThumbnailRequest):
+    """Queue three AI-assisted thumbnail candidates for a ready VOD."""
+    with SessionLocal() as db:
+        vod = db.get(Vod, payload.vod_id)
+        if vod is None or vod.status != VodStatus.ready or not vod.storage_key:
+            raise HTTPException(409, "Select a ready VOD from the vault first")
+        items = [SmartThumbnail(vod_id=vod.id, platform=payload.platform, frame_style=payload.frame_style) for _ in range(3)]
+        db.add_all(items); db.commit()
+        for item in items: db.refresh(item)
+        response = [smart_thumbnail_data(item) for item in items]
+    celery_app.send_task("app.worker.smart_thumbnails.generate_smart_thumbnails", args=[[item["id"] for item in response]])
+    return response
+
+
+@app.get("/smart-thumbnails/{thumbnail_id}")
+def smart_thumbnail_status(thumbnail_id: UUID):
+    with SessionLocal() as db:
+        item = db.get(SmartThumbnail, thumbnail_id)
+        if item is None: raise HTTPException(404, "Thumbnail not found")
+        return smart_thumbnail_data(item)
+
+
+@app.get("/smart-thumbnails/{thumbnail_id}/image")
+def download_smart_thumbnail(thumbnail_id: UUID):
+    with SessionLocal() as db:
+        item = db.get(SmartThumbnail, thumbnail_id)
+        if item is None or item.status != "ready" or not item.output_path:
+            raise HTTPException(404, "Thumbnail is not ready")
+        output = Path(item.output_path)
+    if not output.is_file(): raise HTTPException(404, "Thumbnail file is unavailable")
+    return FileResponse(output, media_type="image/jpeg", filename=f"klipr-thumbnail-{thumbnail_id}.jpg")
 
 def _ensure_preset_schema(db):
     # Lazy, idempotent upgrade keeps existing deployments compatible without
