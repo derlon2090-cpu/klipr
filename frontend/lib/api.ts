@@ -125,7 +125,7 @@ export type VodStatus = "fetching_metadata" | "downloading" | "remuxing" | "read
 export type Vod = {
   id: string;
   url: string;
-  platform: "twitch" | "kick";
+  platform: string;
   quality: string;
   status: VodStatus;
   title: string | null;
@@ -278,6 +278,7 @@ export const api = {
   vodStatus: (id: string) => request<Vod>(`/vods/status/${id}`),
   deleteVod: (id: string) => request<void>(`/vods/${id}`, { method: "DELETE" }),
   openVodInEditor: (id: string) => request<Stream>(`/vods/${id}/open-in-editor`, { method: "POST" }),
+  generateVodClips: (id: string) => request<void>(`/vods/${id}/generate-clips`, { method: "POST", body: JSON.stringify({}) }),
   archiveShorts: () => request<ArchiveShort[]>("/archive/shorts"),
   stream: (id: string) => request<Stream>(`/streams/${id}`),
   preview: (stream_url: string) =>

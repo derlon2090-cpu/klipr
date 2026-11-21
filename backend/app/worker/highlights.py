@@ -156,12 +156,20 @@ def process_stream_highlights(stream_id: str, max_clips: int = 3) -> None:
                 window = Window(highlight.start, highlight.end, highlight.viral_score / 100)
                 ass, output = job_dir / f"highlight-{index}.ass", job_dir / f"highlight-{index}.mp4"
                 snippet = write_ass(list(highlight.words), window.start, window.end, ass)
+                raw_output = job_dir / f"highlight-{index}-raw.mp4"
+                render_vertical(vod, ass, window, raw_output, layout_mode)
+                # Preserve a user's source cover as a brief opening frame, then
+                # always apply the approved eight-second sponsor bumper.
+                branded_source = raw_output
                 if intro_thumbnail:
-                    raw_output = job_dir / f"highlight-{index}-raw.mp4"
-                    render_vertical(vod, ass, window, raw_output, layout_mode)
-                    add_intro_thumbnail(raw_output, intro_thumbnail, output)
-                else:
-                    render_vertical(vod, ass, window, output, layout_mode)
+                    cover_output = job_dir / f"highlight-{index}-cover.mp4"
+                    add_intro_thumbnail(raw_output, intro_thumbnail, cover_output)
+                    branded_source = cover_output
+                from .branding import prepend_intro, render_sponsor_intro
+                bumper = job_dir / "klipr-sponsor-intro.mp4"
+                if not bumper.exists():
+                    render_sponsor_intro(bumper)
+                prepend_intro(bumper, branded_source, output)
                 if remove_music:
                     from .audio_clean import clean_vocal_audio
                     cleaned_output = job_dir / f"highlight-{index}-vocals.mp4"

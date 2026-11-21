@@ -1,4 +1,5 @@
 import base64
+import ipaddress
 import hashlib
 import hmac
 import json
@@ -331,7 +332,7 @@ def normalize_live_url(value: str) -> tuple[str, str]:
 
 
 def normalize_vod_url(value: str) -> tuple[str, str]:
-    """Permit only public, archived VOD URLs; never pass arbitrary URLs to yt-dlp."""
+    """Accept public archive URLs from any yt-dlp supported video platform."""
     parsed = urlparse(value.strip())
     try:
         port = parsed.port
@@ -339,14 +340,19 @@ def normalize_vod_url(value: str) -> tuple[str, str]:
         raise HTTPException(422, "Invalid port") from error
     if parsed.scheme != "https" or parsed.username or parsed.password or port not in {None, 443}:
         raise HTTPException(422, "A standard HTTPS VOD URL is required")
-    host = (parsed.hostname or "").lower()
+    try:
+        host = (parsed.hostname or "").encode("idna").decode("ascii").lower()
+    except UnicodeError as error:
+        raise HTTPException(422, "Invalid hostname") from error
     path = parsed.path.rstrip("/")
-    platform = "twitch" if host in {"twitch.tv", "www.twitch.tv", "m.twitch.tv"} else "kick" if host in {"kick.com", "www.kick.com"} else None
-    is_twitch_vod = platform == "twitch" and bool(re.fullmatch(r"/videos/\d+", path))
-    # Kick has used both /channel/videos/<id> and /channel?clip=<id> forms. Keep imports finite only.
-    is_kick_vod = platform == "kick" and bool(re.fullmatch(r"/[A-Za-z0-9_-]+/videos/[A-Za-z0-9_-]+", path))
-    if not (is_twitch_vod or is_kick_vod):
-        raise HTTPException(422, "Paste a saved Twitch or Kick VOD URL, not a live channel URL")
+    if not host or host == "localhost" or host.endswith(".localhost") or not path:
+        raise HTTPException(422, "A public HTTPS video URL is required")
+    try:
+        if ipaddress.ip_address(host).is_private or ipaddress.ip_address(host).is_loopback:
+            raise HTTPException(422, "Private network addresses are not allowed")
+    except ValueError:
+        pass
+    platform = "twitch" if host in {"twitch.tv", "www.twitch.tv", "m.twitch.tv"} else "kick" if host in {"kick.com", "www.kick.com"} else "web"
     return platform, urlunparse(("https", host, path, "", parsed.query, ""))
 
 
@@ -574,6 +580,13 @@ def open_vod_in_editor(vod_id: UUID):
             stream.thumbnail_key = thumb_key
         db.commit(); db.refresh(stream)
         return stream_data(stream)
+
+
+@app.post("/vods/{vod_id}/generate-clips", status_code=202)
+def generate_vod_clips(vod_id: UUID, payload: ProcessRequest = ProcessRequest()):
+    """The VOD Vault one-click route: stage, brand and queue clips in one request."""
+    stream = open_vod_in_editor(vod_id)
+    return process_stream(UUID(stream["id"]), payload)
 
 
 @app.delete("/vods/{vod_id}", status_code=204)

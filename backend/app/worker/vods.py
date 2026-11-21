@@ -155,6 +155,23 @@ def _save_thumbnail(url: str | None, directory: Path) -> str | None:
         return None
 
 
+def _extract_best_frame(video: Path, directory: Path) -> str | None:
+    """Fallback cover when providers do not expose artwork.
+
+    FFmpeg's thumbnail filter selects a representative frame from a spread of
+    samples, avoiding the first/black frame common in archived broadcasts.
+    """
+    target = directory / "thumbnail.jpg"
+    try:
+        subprocess.run([
+            "ffmpeg", "-y", "-ss", "00:00:12", "-i", str(video), "-vf",
+            "fps=1/12,thumbnail=20,scale=1280:-2", "-frames:v", "1", "-q:v", "2", str(target),
+        ], check=True, capture_output=True, text=True, timeout=180)
+        return str(target) if target.exists() and target.stat().st_size else None
+    except Exception:
+        return None
+
+
 @shared_task(bind=True, autoretry_for=(OSError,), retry_backoff=True, retry_kwargs={"max_retries": 2})
 def import_vod(self, vod_id: str) -> None:
     """Fetch metadata, download fragments concurrently, then make a seekable MP4 without re-encoding."""
@@ -219,6 +236,8 @@ def import_vod(self, vod_id: str) -> None:
         _update(identifier, status=VodStatus.remuxing, progress=99, download_speed=None, eta_seconds=None)
         subprocess.run(["ffmpeg", "-y", "-i", str(source), "-map", "0", "-c", "copy", "-movflags", "+faststart", str(final)],
                        check=True, capture_output=True, text=True, timeout=3600)
+        # Prefer platform artwork, but never make the VOD card depend on it.
+        thumbnail_path = thumbnail_path or _extract_best_frame(final, directory)
         storage_key = f"vods/{vod_id}/vod.mp4"
         upload_file(final, storage_key, "video/mp4")
         thumbnail_key = None

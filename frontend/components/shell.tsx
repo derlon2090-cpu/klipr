@@ -6,7 +6,6 @@ import {
   CheckCheck,
   Clapperboard,
   Clock3,
-  Image as ImageIcon,
   LogOut,
   Menu,
   MessageSquareText,
@@ -14,7 +13,6 @@ import {
   Plus,
   Radio,
   FolderDown,
-  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
@@ -27,8 +25,6 @@ export type DashboardSection =
   | "vods"
   | "archive"
   | "shorts"
-  | "thumbnail"
-  | "branding"
   | "suggestions"
   | "session";
 
@@ -173,20 +169,6 @@ export function Shell({
       icon: Clapperboard,
       ar: "صانع الشورتات",
       en: "Shorts & Clipper",
-      group: "studio",
-    },
-    {
-      id: "thumbnail",
-      icon: ImageIcon,
-      ar: "صانع الثامبنايل",
-      en: "Thumbnail Studio",
-      group: "studio",
-    },
-    {
-      id: "branding",
-      icon: Sparkles,
-      ar: "الهوية وشاشة النهاية",
-      en: "Branding & Outro",
       group: "studio",
     },
     {
