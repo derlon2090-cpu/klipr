@@ -20,7 +20,7 @@ def celery_redis_url(url: str) -> str:
 broker_url = celery_redis_url(settings.redis_url)
 celery_app = Celery("klipr", broker=broker_url, backend=broker_url)
 celery_app.conf.update(task_track_started=True, task_serializer="json", accept_content=["json"], result_serializer="json")
-celery_app.conf.imports = ("app.worker.tasks", "app.worker.highlights", "app.worker.watcher")
+celery_app.conf.imports = ("app.worker.tasks", "app.worker.highlights", "app.worker.vods", "app.worker.watcher")
 celery_app.conf.beat_schedule = {
     "check-creator-watchlist-every-minute": {
         "task": "app.worker.watcher.check_watchlist_streams",

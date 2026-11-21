@@ -9,6 +9,7 @@ node_modules/
 .next/
 *.tsbuildinfo
 media-data/
+backend/celery-worker*.log
 
 .vercel
 .env*.local
