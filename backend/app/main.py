@@ -1,4 +1,5 @@
 import base64
+import os
 import ipaddress
 import hashlib
 import hmac
@@ -666,6 +667,12 @@ async def create_studio_render(
         thumb_path = await _save_studio_upload(thumbnail, folder / "thumbnail", {".png", ".jpg", ".jpeg", ".webp"}, 12 * 1024 * 1024)
         intro_path = await _save_studio_upload(intro, folder / "intro.mp4", {".mp4", ".mov"}, 20 * 1024 * 1024 * 1024)
         outro_path = await _save_studio_upload(outro, folder / "outro.mp4", {".mp4", ".mov"}, 20 * 1024 * 1024 * 1024)
+        # API runs as root to accept uploads; the Celery media worker is
+        # intentionally unprivileged. Hand this job directory to that worker.
+        os.chown(folder, 10001, 10001)
+        for uploaded in (thumb_path, intro_path, outro_path):
+            if uploaded:
+                os.chown(uploaded, 10001, 10001)
         with SessionLocal() as db:
             item = db.get(StudioRender, render_id)
             item.thumbnail_path, item.intro_path, item.outro_path = thumb_path, intro_path, outro_path
