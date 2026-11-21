@@ -54,6 +54,24 @@ def render_studio(self, render_id: str) -> None:
         _update(rid, status="processing", progress=5, error_message=None)
         job_dir.mkdir(parents=True, exist_ok=True)
         download_file(vod.storage_key, source)
+        _update(rid, progress=65)
+        with SessionLocal() as db:
+            thumbnail = db.get(StudioRender, rid).thumbnail_path
+        # A cover-only export does not alter the timeline. Stream-copy the VOD
+        # and attach the cover instead of needlessly re-encoding multi-GB media.
+        if not intro and not outro:
+            if thumbnail:
+                subprocess.run([
+                    "ffmpeg", "-y", "-i", str(source), "-i", thumbnail,
+                    "-map", "0", "-map", "1:v:0", "-c", "copy",
+                    "-c:v:1", "mjpeg", "-frames:v:1", "1",
+                    "-disposition:v:1", "attached_pic", "-movflags", "+faststart",
+                    str(output),
+                ], check=True, capture_output=True, text=True, timeout=7200)
+            else:
+                shutil.move(source, output)
+            _update(rid, status="ready", progress=100, output_path=str(output))
+            return
         probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=r_frame_rate", "-of", "default=nw=1:nk=1", str(source)], capture_output=True, text=True, check=False)
         raw_fps = probe.stdout.strip().split("/")
         fps = round(float(raw_fps[0]) / float(raw_fps[1])) if len(raw_fps) == 2 and raw_fps[1] != "0" else 30
