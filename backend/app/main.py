@@ -1148,6 +1148,10 @@ def process_stream(stream_id: UUID, payload: ProcessRequest = ProcessRequest()):
                 suffix = Path(branding.default_short_thumbnail_key).suffix or ".png"
                 stream.short_thumbnail_key = f"streams/{stream.id}/short-thumbnail{suffix}"
                 copy_file(branding.default_short_thumbnail_key, stream.short_thumbnail_key)
+        # Persist the queued state before dispatching Celery so every client
+        # immediately sees that automatic editing has started.
+        stream.status = StreamStatus.processing
+        stream.error_message = None
         db.commit()
     # Keep the Vercel API package lean; the Whisper worker imports this only in its own container.
     task = celery_app.send_task("app.worker.highlights.process_stream_highlights", args=[str(stream_id), payload.max_clips])

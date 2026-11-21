@@ -4,6 +4,7 @@ import {
   Archive,
   Check,
   CheckCircle2,
+  Clapperboard,
   Clock3,
   Download,
   ExternalLink,
@@ -252,6 +253,11 @@ export default function Dashboard() {
     return () => clearInterval(timer);
   }, [section, vods]);
   useEffect(() => {
+    if (section !== "archive" || !streams.some((stream) => stream.status === "processing")) return;
+    const timer = setInterval(load, 3000);
+    return () => clearInterval(timer);
+  }, [section, streams]);
+  useEffect(() => {
     const value = url.trim();
     setPreview(null);
     if (!/^https:\/\/(?:www\.|m\.)?(?:twitch\.tv|kick\.com)\//i.test(value))
@@ -417,6 +423,19 @@ export default function Dashboard() {
       );
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Request failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const generateArchiveClips = async (stream: Stream) => {
+    setBusy(true);
+    setMessage("");
+    try {
+      await api.process(stream.id, { duration_seconds: 30, max_clips: 3, layout_mode: "split", remove_music: stream.remove_music });
+      await load();
+      setMessage(ar ? "بدأ التعديل التلقائي. ستتحدث البطاقة حتى اكتمال الشورتات." : "Automatic editing started. This card will update until the Shorts are ready.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not start automatic editing");
     } finally {
       setBusy(false);
     }
@@ -1233,53 +1252,18 @@ export default function Dashboard() {
                       {stream.clip_count ?? 0} {ar ? "شورت" : "Shorts"}
                     </span>
                   </div>
-                  <div className="mt-5 grid grid-cols-2 gap-2">
-                    {stream.master_url && (
-                      <a
-                        href={stream.master_url}
-                        download
-                        className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold"
-                      >
-                        <Download size={14} />
-                        {ar ? "تحميل البث" : "Master VOD"}
-                      </a>
-                    )}
-                    {stream.thumbnail_url && (
-                      <a
-                        href={stream.thumbnail_url}
-                        download
-                        className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold"
-                      >
-                        <Download size={14} />
-                        {ar ? "الثامبنايل" : "Thumbnail"}
-                      </a>
-                    )}
-                    <button
-                      onClick={() => {
-                        setSelected(stream.id);
-                        changeSection("shorts");
-                      }}
-                      className="inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-500 px-3 py-2 text-xs font-bold text-white"
-                    >
-                      <WandSparkles size={14} />
-                      {ar ? "صانع الشورتات" : "Shorts studio"}
-                    </button>
-                    <label className="inline-flex cursor-pointer items-center justify-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold">
-                      <Upload size={14} />
-                      {ar ? "رفع غلاف" : "Upload cover"}
-                      <input
-                        type="file"
-                        accept="image/png,image/jpeg,image/webp"
-                        className="hidden"
-                        onChange={(e) =>
-                          uploadRecordingThumbnail(
-                            stream.id,
-                            e.target.files?.[0],
-                          )
-                        }
-                      />
-                    </label>
-                  </div>
+                  {stream.status === "processing" ? (
+                    <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-center text-sm font-black text-emerald-700">
+                      <span className="inline-flex items-center gap-2"><Sparkles size={16} className="animate-pulse" />{ar ? "جارٍ تحليل البث وتعديل الشورتات تلقائياً…" : "Analyzing and editing Shorts automatically…"}</span>
+                    </div>
+                  ) : (stream.clip_count ?? 0) > 0 ? (
+                    <div className="mt-5 grid grid-cols-2 gap-2">
+                      <button onClick={() => setArchiveKind("short")} className="col-span-2 inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-500 px-3 py-3 text-xs font-black text-white"><Clapperboard size={15}/>{ar ? `عرض الشورتات الجاهزة (${stream.clip_count})` : `View ready Shorts (${stream.clip_count})`}</button>
+                      {stream.master_url && <a href={stream.master_url} download className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold"><Download size={14}/>{ar ? "تنزيل البث الأصلي" : "Original VOD"}</a>}
+                    </div>
+                  ) : (
+                    <button onClick={() => generateArchiveClips(stream)} disabled={busy || !stream.master_url} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 font-black text-white disabled:opacity-50"><WandSparkles size={17}/>{ar ? "تعديل المقاطع تلقائياً" : "Edit clips automatically"}</button>
+                  )}
                   <button
                     onClick={() => setDeleting(stream.id)}
                     className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg py-2 text-xs font-bold text-rose-600 hover:bg-rose-50"
