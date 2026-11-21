@@ -304,12 +304,12 @@ class PasswordRequest(BaseModel): password: str
 class EmailRequest(BaseModel): email: str
 class VodImportRequest(BaseModel):
     url: str = Field(min_length=12, max_length=2000)
-    quality: str = "best"
+    quality: str = "original"
 
 
 def studio_render_data(item: StudioRender) -> dict:
     return {"id": str(item.id), "vod_id": str(item.vod_id), "status": item.status,
-            "progress": item.progress, "error": item.error_message,
+            "progress": item.progress, "export_quality": item.export_quality, "error": item.error_message,
             "download_url": f"/studio/renders/{item.id}/download" if item.status == "ready" and item.output_path else None,
             "created_at": item.created_at.isoformat() if item.created_at else None}
 
@@ -399,7 +399,8 @@ def vod_data(vod: Vod) -> dict:
         "title": vod.title, "streamer_name": vod.streamer_name, "duration_seconds": vod.duration_seconds,
         "thumbnail_url": f"/vods/{vod.id}/thumbnail" if vod.thumbnail_key else vod.thumbnail_url,
         "progress": round(vod.progress or 0, 1), "download_speed": vod.download_speed,
-        "eta_seconds": vod.eta_seconds, "file_size": vod.file_size, "error": vod.error_message,
+        "eta_seconds": vod.eta_seconds, "file_size": vod.file_size, "width": vod.width,
+        "height": vod.height, "fps": vod.fps, "bitrate": vod.bitrate, "error": vod.error_message,
         "download_url": f"/vods/{vod.id}/download" if vod.status == VodStatus.ready else None,
         "created_at": vod.created_at, "updated_at": vod.updated_at,
     }
@@ -501,11 +502,9 @@ def readiness():
 @app.post("/vods/import", status_code=202)
 def create_vod_import(payload: VodImportRequest):
     platform, normalized_url = normalize_vod_url(payload.url)
-    quality = payload.quality.strip().lower() or "best"
-    if quality not in {"best", "1080p", "720p", "480p"}:
-        raise HTTPException(422, "quality must be best, 1080p, 720p, or 480p")
-    # yt-dlp format selectors retain the original streams; no transcoding happens here.
-    selector = {"best": "best", "1080p": "best[height<=1080]", "720p": "best[height<=720]", "480p": "best[height<=480]"}[quality]
+    quality = payload.quality.strip().lower() or "original"
+    if quality not in {"original", "4k_upscale"}:
+        raise HTTPException(422, "quality must be original or 4k_upscale")
     try:
         info = extract_vod_metadata(normalized_url)
     except Exception as error:
@@ -531,12 +530,13 @@ def create_vod_import(payload: VodImportRequest):
         raise HTTPException(503, "عامل الاستخراج غير متصل حالياً. لم يتم إنشاء مهمة معلّقة.")
     with SessionLocal() as db:
         existing = db.query(Vod).filter(Vod.source_url == normalized_url).first()
-        if existing and existing.status == VodStatus.ready:
+        same_original = existing and existing.quality in {"best", "bestvideo+bestaudio/best"} and quality == "original"
+        if existing and existing.status == VodStatus.ready and (existing.quality == quality or same_original):
             return vod_data(existing)
         if existing and existing.status in {VodStatus.fetching_metadata, VodStatus.downloading, VodStatus.remuxing} and not _vod_is_stale(existing):
             return vod_data(existing)
         vod = existing or Vod(source_url=normalized_url, platform=platform)
-        vod.quality = selector
+        vod.quality = quality
         vod.status = VodStatus.downloading
         vod.title = title
         vod.streamer_name = uploader
@@ -650,7 +650,7 @@ def delete_vod(vod_id: UUID):
 @app.post("/studio/renders", status_code=202)
 async def create_studio_render(
     vod_id: UUID = Form(...),
-    thumbnail: UploadFile | None = File(None),
+    export_quality: str = Form("original"),
     intro: UploadFile | None = File(None),
     outro: UploadFile | None = File(None),
 ):
@@ -659,23 +659,24 @@ async def create_studio_render(
         vod = db.get(Vod, vod_id)
         if vod is None or vod.status != VodStatus.ready or not vod.storage_key:
             raise HTTPException(409, "Select a ready VOD from the vault first")
-        render = StudioRender(vod_id=vod_id, status="queued", progress=0)
+        if export_quality not in {"original", "4k"}:
+            raise HTTPException(422, "export_quality must be original or 4k")
+        render = StudioRender(vod_id=vod_id, status="queued", progress=0, export_quality=export_quality)
         db.add(render); db.commit(); db.refresh(render)
         render_id = render.id
     folder = Path("/var/lib/klipr/studio") / str(render_id)
     try:
-        thumb_path = await _save_studio_upload(thumbnail, folder / "thumbnail", {".png", ".jpg", ".jpeg", ".webp"}, 12 * 1024 * 1024)
         intro_path = await _save_studio_upload(intro, folder / "intro.mp4", {".mp4", ".mov"}, 20 * 1024 * 1024 * 1024)
         outro_path = await _save_studio_upload(outro, folder / "outro.mp4", {".mp4", ".mov"}, 20 * 1024 * 1024 * 1024)
         # API runs as root to accept uploads; the Celery media worker is
         # intentionally unprivileged. Hand this job directory to that worker.
         os.chown(folder, 10001, 10001)
-        for uploaded in (thumb_path, intro_path, outro_path):
+        for uploaded in (intro_path, outro_path):
             if uploaded:
                 os.chown(uploaded, 10001, 10001)
         with SessionLocal() as db:
             item = db.get(StudioRender, render_id)
-            item.thumbnail_path, item.intro_path, item.outro_path = thumb_path, intro_path, outro_path
+            item.intro_path, item.outro_path = intro_path, outro_path
             db.commit(); db.refresh(item)
             response = studio_render_data(item)
         render_studio.delay(str(render_id))

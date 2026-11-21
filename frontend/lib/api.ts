@@ -140,6 +140,10 @@ export type Vod = {
   download_speed: string | null;
   eta_seconds: number | null;
   file_size: number | null;
+  width: number | null;
+  height: number | null;
+  fps: number | null;
+  bitrate: number | null;
   error: string | null;
   download_url: string | null;
   created_at: string;
@@ -150,6 +154,7 @@ export type StudioRender = {
   vod_id: string;
   status: "queued" | "processing" | "ready" | "failed";
   progress: number;
+  export_quality: "original" | "4k";
   error: string | null;
   download_url: string | null;
   created_at: string | null;
@@ -286,16 +291,16 @@ export const api = {
     }),
   streams: () => request<Stream[]>("/streams"),
   vods: () => request<Vod[]>("/vods"),
-  importVod: (url: string, quality = "best") =>
+  importVod: (url: string, quality: "original" | "4k_upscale" = "original") =>
     request<Vod>("/vods/import", { method: "POST", body: JSON.stringify({ url, quality }) }),
   vodStatus: (id: string) => request<Vod>(`/vods/status/${id}`),
   deleteVod: (id: string) => request<void>(`/vods/${id}`, { method: "DELETE" }),
   openVodInEditor: (id: string) => request<Stream>(`/vods/${id}/open-in-editor`, { method: "POST" }),
   generateVodClips: (id: string) => request<void>(`/vods/${id}/generate-clips`, { method: "POST", body: JSON.stringify({}) }),
-  createStudioRender: (vodId: string, assets: { thumbnail?: File | null; intro?: File | null; outro?: File | null }) => {
+  createStudioRender: (vodId: string, assets: { exportQuality: "original" | "4k"; intro?: File | null; outro?: File | null }) => {
     const body = new FormData();
     body.append("vod_id", vodId);
-    if (assets.thumbnail) body.append("thumbnail", assets.thumbnail);
+    body.append("export_quality", assets.exportQuality);
     if (assets.intro) body.append("intro", assets.intro);
     if (assets.outro) body.append("outro", assets.outro);
     return upload<StudioRender>("/studio/renders", body);

@@ -172,6 +172,27 @@ def _extract_best_frame(video: Path, directory: Path) -> str | None:
         return None
 
 
+def _probe_video(path: Path) -> dict[str, int | float | None]:
+    """Return the actual delivered dimensions, FPS and container bitrate."""
+    result = subprocess.run([
+        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=width,height,avg_frame_rate:format=bit_rate",
+        "-of", "json", str(path),
+    ], check=True, capture_output=True, text=True, timeout=120)
+    payload = json.loads(result.stdout or "{}")
+    stream = (payload.get("streams") or [{}])[0]
+    rate = str(stream.get("avg_frame_rate") or "0/1").split("/", 1)
+    try:
+        fps = round(float(rate[0]) / float(rate[1]), 2) if float(rate[1]) else None
+    except (ValueError, IndexError):
+        fps = None
+    try:
+        bitrate = int((payload.get("format") or {}).get("bit_rate") or 0) or None
+    except (TypeError, ValueError):
+        bitrate = None
+    return {"width": stream.get("width"), "height": stream.get("height"), "fps": fps, "bitrate": bitrate}
+
+
 @shared_task(bind=True, autoretry_for=(OSError,), retry_backoff=True, retry_kwargs={"max_retries": 2})
 def import_vod(self, vod_id: str) -> None:
     """Fetch metadata, download fragments concurrently, then make a seekable MP4 without re-encoding."""
@@ -200,7 +221,7 @@ def import_vod(self, vod_id: str) -> None:
                 status=VodStatus.downloading, progress=1, error_message=None)
 
         template = str(directory / "source.%(ext)s")
-        format_selector = "best" if quality == "best" else quality
+        format_selector = "bestvideo+bestaudio/best"
         session_options, cookie_file, request_headers = _session_download_options(platform, directory)
         download_url = _kick_playback_url(source_url, request_headers) if platform == "kick" else source_url
         command = [
@@ -234,10 +255,14 @@ def import_vod(self, vod_id: str) -> None:
         source = max(candidates, key=lambda path: path.stat().st_size)
         final = directory / "vod.mp4"
         _update(identifier, status=VodStatus.remuxing, progress=99, download_speed=None, eta_seconds=None)
-        if source.suffix.lower() == ".mp4":
-            # yt-dlp already remuxed the HLS fragments to a fast-start MP4;
-            # renaming avoids copying multi-gigabyte VODs through FFmpeg twice.
-            source.replace(final)
+        if quality == "4k_upscale":
+            subprocess.run([
+                "ffmpeg", "-y", "-i", str(source), "-map", "0:v:0", "-map", "0:a?",
+                "-vf", "scale=3840:2160:force_original_aspect_ratio=decrease:flags=lanczos,pad=3840:2160:(ow-iw)/2:(oh-ih)/2,unsharp=5:5:0.5:5:5:0,fps=60",
+                "-c:v", "libx264", "-preset", "medium", "-crf", "16",
+                "-c:a", "aac", "-b:a", "320k", "-ar", "48000",
+                "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(final),
+            ], check=True, capture_output=True, text=True, timeout=86400)
         else:
             subprocess.run(["ffmpeg", "-y", "-i", str(source), "-map", "0", "-c", "copy", "-movflags", "+faststart", str(final)],
                            check=True, capture_output=True, text=True, timeout=3600)
@@ -249,9 +274,10 @@ def import_vod(self, vod_id: str) -> None:
         if thumbnail_path:
             thumbnail_key = f"vods/{vod_id}/thumbnail.jpg"
             upload_file(Path(thumbnail_path), thumbnail_key, "image/jpeg")
+        media = _probe_video(final)
         _update(identifier, status=VodStatus.ready, progress=100, storage_key=storage_key,
                 thumbnail_key=thumbnail_key, local_path=None, thumbnail_path=None,
-                file_size=final.stat().st_size, download_speed=None, eta_seconds=None)
+                file_size=final.stat().st_size, download_speed=None, eta_seconds=None, **media)
         shutil.rmtree(directory, ignore_errors=True)
     except Exception as error:
         _update(identifier, status=VodStatus.failed, error_message=str(error)[:2000], download_speed=None, eta_seconds=None)

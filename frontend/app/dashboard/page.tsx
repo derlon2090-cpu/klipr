@@ -106,6 +106,13 @@ const fileSize = (bytes: number | null) => {
   if (!bytes) return "—";
   return bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(2)} GB` : `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 };
+const vodQualityText = (vod: Vod) => {
+  const fps = vod.fps ? Math.round(vod.fps) : null;
+  if (vod.height && vod.height >= 2160) return `4K 2160p${fps || 60}`;
+  if (vod.height) return `${vod.height}p${fps || ""} Source`;
+  return vod.quality === "4k_upscale" ? "4K 2160p60" : "Original Max";
+};
+const bitrateText = (bitrate: number | null) => bitrate ? `${(bitrate / 1_000_000).toFixed(1)} Mbps` : "—";
 
 function SectionTitle({
   eyebrow,
@@ -187,12 +194,12 @@ export default function Dashboard() {
   const [sessionBusy, setSessionBusy] = useState<"kick" | "twitch" | null>(null);
   const [vods, setVods] = useState<Vod[]>([]);
   const [vodUrl, setVodUrl] = useState("");
-  const [vodQuality, setVodQuality] = useState("best");
+  const [vodQuality, setVodQuality] = useState<"original" | "4k_upscale">("original");
   const [vodBusy, setVodBusy] = useState(false);
   const [studioVodId, setStudioVodId] = useState("");
-  const [studioThumbnail, setStudioThumbnail] = useState<File | null>(null);
   const [studioIntro, setStudioIntro] = useState<File | null>(null);
   const [studioOutro, setStudioOutro] = useState<File | null>(null);
+  const [studioExportQuality, setStudioExportQuality] = useState<"original" | "4k">("original");
   const [studioRender, setStudioRender] = useState<StudioRender | null>(null);
   const [studioBusy, setStudioBusy] = useState(false);
 
@@ -2091,7 +2098,7 @@ export default function Dashboard() {
     }
     setStudioBusy(true);
     try {
-      const render = await api.createStudioRender(studioVodId, { thumbnail: studioThumbnail, intro: studioIntro, outro: studioOutro });
+      const render = await api.createStudioRender(studioVodId, { exportQuality: studioExportQuality, intro: studioIntro, outro: studioOutro });
       setStudioRender(render);
       setMessage(ar ? "بدأ تجهيز المقطع — يمكنك متابعة التقدم هنا." : "Render started — follow its progress here.");
     } catch (error) {
@@ -2100,7 +2107,7 @@ export default function Dashboard() {
   };
   const studioView = (
     <>
-      <SectionTitle icon={Clapperboard} eyebrow={ar ? "استوديو الإنتاج" : "PRODUCTION STUDIO"} title={ar ? "الاستديو المتكامل" : "Production Studio"} description={ar ? "اختر بثاً محفوظاً، أضف أصولك من جهازك، ثم جهّز ملف MP4 موحداً وجاهزاً للتنزيل." : "Choose a vault VOD, add local assets, then render a normalized downloadable MP4."} />
+      <SectionTitle icon={Clapperboard} eyebrow={ar ? "استوديو الإنتاج" : "PRODUCTION STUDIO"} title={ar ? "الاستديو المتكامل" : "Production Studio"} description={ar ? "اختر بثاً محفوظاً، أضف المقدمة والنهاية، ثم جهّز ملف MP4 موحداً وجاهزاً للتنزيل." : "Choose a vault VOD, add an intro and outro, then render a normalized downloadable MP4."} />
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_390px]">
         <section className="space-y-5 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <label className="block text-sm font-black">{ar ? "1. البث أو المقطع من مكتبة البثوث المحفوظة" : "1. VOD from the saved broadcast vault"}
@@ -2110,18 +2117,26 @@ export default function Dashboard() {
             </select>
           </label>
           {studioVodId && (() => { const vod = vods.find((item) => item.id === studioVodId); return vod?.download_url ? <video controls className="aspect-video w-full rounded-xl bg-black" src={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${vod.download_url}`} /> : null; })()}
-          <div className="grid gap-4 md:grid-cols-3">
-            <AssetPicker label={ar ? "2. صورة الثامبنيل" : "2. Thumbnail image"} accept="image/png,image/jpeg,image/webp" file={studioThumbnail} onChange={setStudioThumbnail} hint="PNG / JPG / WebP · 12MB" />
-            <AssetPicker label={ar ? "فيديو المقدمة" : "Intro video"} accept="video/mp4,video/quicktime" file={studioIntro} onChange={setStudioIntro} hint="MP4 / MOV · optional" />
-            <AssetPicker label={ar ? "فيديو النهاية" : "Outro video"} accept="video/mp4,video/quicktime" file={studioOutro} onChange={setStudioOutro} hint="MP4 / MOV · optional" />
+          <div>
+            <p className="mb-3 text-sm font-black">{ar ? "2. المقدمة والنهاية" : "2. Intro & Outro"}</p>
+            <div className="grid gap-4 md:grid-cols-2">
+              <AssetPicker label={ar ? "فيديو المقدمة" : "Intro video"} accept="video/mp4,video/quicktime" file={studioIntro} onChange={setStudioIntro} hint="MP4 / MOV · optional" />
+              <AssetPicker label={ar ? "فيديو النهاية" : "Outro video"} accept="video/mp4,video/quicktime" file={studioOutro} onChange={setStudioOutro} hint="MP4 / MOV · optional" />
+            </div>
           </div>
-          {studioThumbnail && <img src={URL.createObjectURL(studioThumbnail)} alt="Thumbnail preview" className="aspect-video max-w-sm rounded-xl border object-cover" />}
-          <button onClick={startStudioRender} disabled={studioBusy || !studioVodId} className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-3.5 font-black text-white disabled:opacity-50"><Sparkles size={18}/>{studioBusy ? (ar ? "جارٍ الحفظ…" : "Saving…") : (ar ? "حفظ وتجهيز المقطع" : "Save & Render")}</button>
-          <p className="text-xs leading-5 text-slate-500">{ar ? "توحيد تلقائي: 1920×1080، معدل الإطارات المصدر، صوت AAC بتردد 48kHz، ثم دمج المقدمة والبث والنهاية. تُدمج الصورة كغلاف MP4 رسمي." : "Automatic normalization: 1920×1080, source FPS, AAC 48kHz; then Intro + VOD + Outro. Your image is embedded as the MP4 cover."}</p>
+          <div>
+            <p className="mb-3 text-sm font-black">{ar ? "جودة التصدير" : "Export quality"}</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <button type="button" onClick={() => setStudioExportQuality("original")} className={`rounded-xl border p-4 text-start ${studioExportQuality === "original" ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-slate-200"}`}><b className="block text-sm">{ar ? "الجودة الأصلية" : "Original quality"}</b><span className="mt-1 block text-xs opacity-70">1080p · {ar ? "حتى 60fps" : "up to 60fps"}</span></button>
+              <button type="button" onClick={() => setStudioExportQuality("4k")} className={`rounded-xl border p-4 text-start ${studioExportQuality === "4k" ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-slate-200"}`}><b className="block text-sm">4K Ultra HD</b><span className="mt-1 block text-xs opacity-70">3840×2160 · 60fps · CRF 16</span></button>
+            </div>
+          </div>
+          <button onClick={startStudioRender} disabled={studioBusy || !studioVodId} className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-3.5 font-black text-white disabled:opacity-50"><Sparkles size={18}/>{studioBusy ? (ar ? "جارٍ الحفظ…" : "Saving…") : (ar ? "3. حفظ وتجهيز" : "3. Save & Render")}</button>
+          <p className="text-xs leading-5 text-slate-500">{ar ? "توحيد تلقائي: 1920×1080، معدل الإطارات المصدر، وصوت AAC بتردد 48kHz، ثم دمج المقدمة + البث + النهاية." : "Automatic normalization: 1920×1080, source FPS and AAC 48kHz; then Intro + VOD + Outro."}</p>
         </section>
         <aside className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="font-black">{ar ? "حالة التجهيز" : "Render status"}</h2>
-          {studioRender ? <div className="mt-5"><div className="flex justify-between text-sm font-bold"><span>{studioRender.status === "ready" ? (ar ? "مكتمل" : "Ready") : studioRender.status === "failed" ? (ar ? "فشل" : "Failed") : (ar ? "قيد المعالجة" : "Processing")}</span><span>{Math.round(studioRender.progress)}%</span></div><div className="mt-2 h-3 overflow-hidden rounded-full bg-slate-100"><div className={`h-full rounded-full ${studioRender.status === "failed" ? "bg-rose-500" : "bg-emerald-500"}`} style={{width: `${studioRender.progress}%`}} /></div>{studioRender.error && <p className="mt-4 rounded-xl bg-rose-50 p-3 text-xs text-rose-700">{studioRender.error}</p>}{studioRender.download_url && <a href={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${studioRender.download_url}`} download className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 font-black text-white"><Download size={17}/>{ar ? "تنزيل المقطع النهائي MP4" : "Download final MP4"}</a>}</div> : <Empty text={ar ? "اختر بثاً وارفع الأصول، ثم اضغط حفظ وتجهيز." : "Choose a VOD, upload assets, then save and render."} />}
+          {studioRender ? <div className="mt-5"><div className="flex justify-between text-sm font-bold"><span>{studioRender.status === "ready" ? (ar ? "مكتمل" : "Ready") : studioRender.status === "failed" ? (ar ? "فشل" : "Failed") : (ar ? "قيد المعالجة" : "Processing")}</span><span>{Math.round(studioRender.progress)}%</span></div><div className="mt-2 h-3 overflow-hidden rounded-full bg-slate-100"><div className={`h-full rounded-full ${studioRender.status === "failed" ? "bg-rose-500" : "bg-emerald-500"}`} style={{width: `${studioRender.progress}%`}} /></div>{studioRender.error && <p className="mt-4 rounded-xl bg-rose-50 p-3 text-xs text-rose-700">{studioRender.error}</p>}{studioRender.download_url && <a href={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${studioRender.download_url}`} download className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 font-black text-white"><Download size={17}/>{ar ? "تنزيل المقطع النهائي MP4" : "Download final MP4"}</a>}</div> : <Empty text={ar ? "اختر بثاً وارفع المقدمة أو النهاية، ثم اضغط حفظ وتجهيز." : "Choose a VOD, add an intro or outro, then save and render."} />}
         </aside>
       </div>
     </>
@@ -2307,16 +2322,17 @@ export default function Dashboard() {
             <input value={vodUrl} onChange={(event) => setVodUrl(event.target.value)} dir="ltr" placeholder="https://www.twitch.tv/videos/...  أو  https://kick.com/user/videos/..." className={`${inputClass} mt-0 ps-11`} />
             <span className={`absolute start-3 top-3.5 text-xs font-black ${/twitch/i.test(vodUrl) ? "text-violet-600" : /kick/i.test(vodUrl) ? "text-lime-600" : "text-slate-400"}`}>{/twitch/i.test(vodUrl) ? "TW" : /kick/i.test(vodUrl) ? "K" : "URL"}</span>
           </div>
-          <select value={vodQuality} onChange={(event) => setVodQuality(event.target.value)} className="rounded-xl border border-emerald-200 bg-white px-4 text-sm font-bold text-slate-700">
-            <option value="best">{ar ? "أفضل جودة أصلية" : "Best original quality"}</option><option value="1080p">1080p</option><option value="720p">720p</option><option value="480p">480p</option>
+          <select value={vodQuality} onChange={(event) => setVodQuality(event.target.value as "original" | "4k_upscale")} className="rounded-xl border border-emerald-200 bg-white px-4 py-3 text-sm font-bold text-slate-700">
+            <option value="original">{ar ? "أعلى جودة أصلية · حتى 4K / 1080p60" : "Original Max · up to 4K / 1080p60"}</option>
+            <option value="4k_upscale">{ar ? "إخراج 4K احترافي · 2160p60" : "4K Pro Upscale · 2160p60"}</option>
           </select>
           <button disabled={vodBusy || !vodUrl.trim()} className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 font-black text-white transition hover:bg-emerald-700 disabled:opacity-50"><FolderDown size={18}/>{ar ? "جلب وحفظ البث" : "Fetch & save VOD"}</button>
         </div>
-        <p className="mt-3 text-xs leading-5 text-emerald-800">{ar ? "يدعم روابط البثوث المحفوظة العامة فقط. لا يجري ضغط الفيديو أو تغيير جودته." : "Public saved-VOD links only. The video is never re-encoded or quality-reduced."}</p>
+        <p className="mt-3 text-xs leading-5 text-emerald-800">{vodQuality === "original" ? (ar ? "يسحب bestvideo+bestaudio ويحفظ الجودة الأصلية بلا ضغط مع faststart." : "Downloads bestvideo+bestaudio and preserves original quality losslessly with faststart.") : (ar ? "يرقّي المصدر إلى 3840×2160 و60fps بتحجيم Lanczos وCRF 16 وصوت AAC 320kbps." : "Upscales to 3840×2160 at 60fps using Lanczos, CRF 16 and AAC 320kbps.")}</p>
       </form>
       {vods.some((vod) => !["ready", "failed"].includes(vod.status)) && <div className="mb-7 space-y-3">{vods.filter((vod) => !["ready", "failed"].includes(vod.status)).map((vod) => <article key={vod.id} className="overflow-hidden rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm"><div className="flex items-center justify-between gap-3"><div className="min-w-0"><p className="truncate font-black">{vod.title || (ar ? "جارٍ استخراج بيانات البث…" : "Fetching VOD metadata…")}</p><p className="mt-1 text-xs font-bold text-emerald-700">{vod.status === "fetching_metadata" ? (ar ? "استخراج البيانات" : "Fetching metadata") : vod.status === "remuxing" ? (ar ? "تجهيز MP4 سريع التقديم" : "Preparing seekable MP4") : (ar ? "تحميل البث" : "Downloading VOD")}</p></div><span className="text-sm font-black text-emerald-700">{Math.round(vod.progress)}%</span></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-emerald-500 transition-all" style={{width: `${Math.max(3, vod.progress)}%`}} /></div><div className="mt-2 flex gap-4 text-xs text-slate-500"><span>{vod.download_speed || "—"}</span><span>{vod.eta_seconds ? `${vod.eta_seconds}s ETA` : ""}</span></div></article>)}</div>}
       <div className="mb-3 flex items-center justify-between"><h2 className="text-lg font-black">{ar ? "البثوث الجاهزة" : "Ready broadcasts"}</h2><span className="text-xs font-bold text-slate-400">{vods.filter((vod) => vod.status === "ready").length}</span></div>
-      {vods.length === 0 ? <Empty text={ar ? "لم تُحفظ أي بثوث بعد. ألصق رابط VOD للبدء." : "No saved broadcasts yet. Paste a VOD URL to begin."} /> : <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">{vods.map((vod) => <article key={vod.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="relative aspect-video bg-slate-100">{vod.thumbnail_url ? <img src={vod.thumbnail_url.startsWith("/") ? `${process.env.NEXT_PUBLIC_API_URL || "/api"}${vod.thumbnail_url}` : vod.thumbnail_url} alt="" className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-slate-300"><Film size={36}/></div>}<span className={`absolute end-3 top-3 rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${platformClass(vod.platform)}`}>{vod.platform}</span></div><div className="p-4"><h3 className="truncate font-black">{vod.title || (ar ? "بث غير مسمّى" : "Untitled broadcast")}</h3><p className="mt-1 truncate text-xs text-slate-500">{vod.streamer_name || "—"}</p><div className="mt-3 flex gap-3 text-xs font-bold text-slate-500"><span>{vodDuration(vod.duration_seconds)}</span><span>{fileSize(vod.file_size)}</span></div>{vod.status === "failed" ? <p className="mt-3 text-xs font-bold text-rose-600">{vod.error || (ar ? "فشل الاستيراد" : "Import failed")}</p> : vod.status === "ready" ? <div className="mt-4 grid grid-cols-2 gap-2"><button onClick={() => generateVodClips(vod)} disabled={vodBusy} className="col-span-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:opacity-50">{ar ? "توليد المقاطع تلقائياً" : "Generate clips automatically"}</button><a href={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${vod.download_url || ""}`} download className="rounded-lg border border-slate-200 px-3 py-2 text-center text-xs font-black text-slate-700">{ar ? "تنزيل مباشر" : "Direct download"}</a><button onClick={() => removeVod(vod.id)} className="rounded-lg px-3 py-2 text-xs font-black text-rose-600 hover:bg-rose-50">{ar ? "حذف" : "Delete"}</button></div> : <p className="mt-3 text-xs font-bold text-slate-400">{ar ? "قيد المعالجة…" : "Processing…"}</p>}</div></article>)}</div>}
+      {vods.length === 0 ? <Empty text={ar ? "لم تُحفظ أي بثوث بعد. ألصق رابط VOD للبدء." : "No saved broadcasts yet. Paste a VOD URL to begin."} /> : <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">{vods.map((vod) => <article key={vod.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="relative aspect-video bg-slate-100">{vod.thumbnail_url ? <img src={vod.thumbnail_url.startsWith("/") ? `${process.env.NEXT_PUBLIC_API_URL || "/api"}${vod.thumbnail_url}` : vod.thumbnail_url} alt="" className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-slate-300"><Film size={36}/></div>}<span className={`absolute end-3 top-3 rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${platformClass(vod.platform)}`}>{vod.platform}</span><span className="absolute start-3 top-3 rounded-full bg-slate-950/85 px-2.5 py-1 text-[10px] font-black text-white backdrop-blur">{vodQualityText(vod)}</span></div><div className="p-4"><h3 className="truncate font-black">{vod.title || (ar ? "بث غير مسمّى" : "Untitled broadcast")}</h3><p className="mt-1 truncate text-xs text-slate-500">{vod.streamer_name || "—"}</p><div className="mt-3 flex flex-wrap gap-3 text-xs font-bold text-slate-500"><span>{vodDuration(vod.duration_seconds)}</span><span>{fileSize(vod.file_size)}</span><span>{bitrateText(vod.bitrate)}</span></div>{vod.status === "failed" ? <p className="mt-3 text-xs font-bold text-rose-600">{vod.error || (ar ? "فشل الاستيراد" : "Import failed")}</p> : vod.status === "ready" ? <div className="mt-4 grid grid-cols-2 gap-2"><button onClick={() => generateVodClips(vod)} disabled={vodBusy} className="col-span-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:opacity-50">{ar ? "توليد المقاطع تلقائياً" : "Generate clips automatically"}</button><a href={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${vod.download_url || ""}`} download className="rounded-lg border border-slate-200 px-3 py-2 text-center text-xs font-black text-slate-700">{ar ? "تنزيل مباشر" : "Direct download"}</a><button onClick={() => removeVod(vod.id)} className="rounded-lg px-3 py-2 text-xs font-black text-rose-600 hover:bg-rose-50">{ar ? "حذف" : "Delete"}</button></div> : <p className="mt-3 text-xs font-bold text-slate-400">{ar ? "قيد المعالجة…" : "Processing…"}</p>}</div></article>)}</div>}
     </>
   );
 
