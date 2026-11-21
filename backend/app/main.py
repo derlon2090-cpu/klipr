@@ -659,7 +659,6 @@ def delete_creator_suggestion(suggestion_id: UUID):
         if item is None: raise HTTPException(404, "Suggestion not found")
         db.delete(item); db.commit()
 def _branding(db):
-    _ensure_preset_schema(db)
     item = db.get(ArchiveBranding, 1)
     if not item: item = ArchiveBranding(id=1); db.add(item); db.commit(); db.refresh(item)
     return item
@@ -717,9 +716,10 @@ async def upload_branding_thumbnail(file: UploadFile = File(...), kind: str = Fo
             old=getattr(item, field); setattr(item, field, key)
             if kind == "vod": item.use_default_thumbnail=True
             db.add(SavedThumbnail(kind=kind, storage_key=key))
+            use_default_thumbnail = bool(item.use_default_thumbnail)
             db.commit()
     finally: path.unlink(missing_ok=True)
-    return {"kind":kind,"key":key,"url":presigned_download_url(key),"use_default_thumbnail":item.use_default_thumbnail}
+    return {"kind":kind,"key":key,"url":presigned_download_url(key),"use_default_thumbnail":use_default_thumbnail}
 
 @app.get("/branding/thumbnails")
 def list_saved_thumbnails():
