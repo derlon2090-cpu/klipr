@@ -63,8 +63,8 @@ def render_studio(self, render_id: str) -> None:
             if thumbnail:
                 subprocess.run([
                     "ffmpeg", "-y", "-i", str(source), "-i", thumbnail,
-                    "-map", "0", "-map", "1:v:0", "-c", "copy",
-                    "-c:v:1", "mjpeg", "-frames:v:1", "1",
+                    "-map", "0:v:0", "-map", "0:a?", "-map", "1:v:0",
+                    "-c", "copy", "-c:v:1", "mjpeg",
                     "-disposition:v:1", "attached_pic", "-movflags", "+faststart",
                     str(output),
                 ], check=True, capture_output=True, text=True, timeout=7200)
