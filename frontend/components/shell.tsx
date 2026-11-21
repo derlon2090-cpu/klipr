@@ -14,6 +14,8 @@ import {
   Radio,
   FolderDown,
   BadgeCheck,
+  Image as ImageIcon,
+  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
@@ -24,11 +26,15 @@ import { LanguageToggle, useLanguage } from "@/components/language";
 export type DashboardSection =
   | "live"
   | "vods"
-  | "archive"
+  | "clips"
+  | "thumbnails"
+  | "intro-outro"
+  | "studio"
+  | "live"
   | "shorts"
   | "suggestions"
-  | "session"
-  | "presets";
+  | "presets"
+  | "sessions";
 
 export function Shell({
   children,
@@ -143,56 +149,49 @@ export function Shell({
     icon: typeof Radio;
     ar: string;
     en: string;
-    group: "capture" | "studio" | "system";
+    group: "library" | "studio" | "settings";
   }[] = [
     {
-      id: "live",
-      icon: Radio,
-      ar: "البثوث النشطة",
-      en: "Live Capture",
-      group: "capture",
-    },
-    {
-      id: "archive",
+      id: "clips",
       icon: Archive,
-      ar: "مكتبة الأرشيف",
-      en: "VOD Archive",
-      group: "capture",
+      ar: "المقاطع النهائية",
+      en: "Rendered Clips",
+      group: "library",
     },
     {
       id: "vods",
       icon: FolderDown,
       ar: "مكتبة البثوث المحفوظة",
       en: "VOD Vault",
-      group: "capture",
+      group: "library",
     },
     {
-      id: "presets",
-      icon: BadgeCheck,
-      ar: "المحفوظات التعديلية",
-      en: "Editing Presets",
-      group: "capture",
-    },
-    {
-      id: "shorts",
-      icon: Clapperboard,
-      ar: "صانع الشورتات",
-      en: "Shorts & Clipper",
+      id: "thumbnails",
+      icon: ImageIcon,
+      ar: "صانع الثامبنيل",
+      en: "Thumbnail Studio",
       group: "studio",
     },
     {
-      id: "session",
+      id: "intro-outro",
+      icon: Sparkles,
+      ar: "صانع المقدمة والنهاية",
+      en: "Intro & Outro",
+      group: "studio",
+    },
+    {
+      id: "studio",
+      icon: Clapperboard,
+      ar: "الاستديو",
+      en: "Production Studio",
+      group: "studio",
+    },
+    {
+      id: "sessions",
       icon: KeyRound,
       ar: "الجلسة",
       en: "Session Vault",
-      group: "system",
-    },
-    {
-      id: "suggestions",
-      icon: MessageSquareText,
-      ar: "الاقتراحات",
-      en: "Suggestions",
-      group: "system",
+      group: "settings",
     },
   ];
   const choose = (id: DashboardSection) => {
@@ -205,9 +204,9 @@ export function Shell({
     window.location.assign("/");
   };
   const groups = [
-    { id: "capture", ar: "المكتبة والأصول", en: "LIBRARY & ASSETS" },
-    { id: "studio", ar: "أدوات الإنتاج", en: "CREATOR STUDIO" },
-    { id: "system", ar: "الربط والنظام", en: "SYSTEM" },
+    { id: "studio", ar: "الإنتاج والاستديو", en: "PRODUCTION & STUDIO" },
+    { id: "library", ar: "الأرشيف والمكتبة", en: "LIBRARY & ARCHIVE" },
+    { id: "settings", ar: "الإعدادات والربط", en: "SETTINGS & CONNECTIONS" },
   ] as const;
   const nav = (
     <nav className="space-y-2 px-3 py-2">
@@ -222,7 +221,7 @@ export function Shell({
                 <span className={`grid size-8 shrink-0 place-items-center rounded-lg ${activeSection === id ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-500"}`}><Icon size={17} /></span>
                 <span className="min-w-0 flex-1 truncate">{ar ? arLabel : en}</span>
                 {id === "live" && activeCount > 0 && <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-black text-white">{activeCount}</span>}
-                {id === "session" && <span className={`size-2.5 shrink-0 rounded-full ${sessionStatus === "active" ? "bg-emerald-500" : sessionStatus === "expired" ? "bg-amber-500" : "bg-slate-300"}`} aria-label={sessionStatus} />}
+                {id === "sessions" && <span className={`size-2.5 shrink-0 rounded-full ${sessionStatus === "active" ? "bg-emerald-500" : sessionStatus === "expired" ? "bg-amber-500" : "bg-slate-300"}`} aria-label={sessionStatus} />}
               </button>
             ))}
           </div>

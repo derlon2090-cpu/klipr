@@ -177,6 +177,22 @@ class Vod(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class StudioRender(Base):
+    """A durable Production Studio render backed by the shared media volume."""
+    __tablename__ = "studio_renders"
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    vod_id: Mapped[UUID] = mapped_column(ForeignKey("vods.id", ondelete="CASCADE"), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="queued", index=True)
+    progress: Mapped[float] = mapped_column(Float, default=0)
+    thumbnail_path: Mapped[str | None] = mapped_column(Text)
+    intro_path: Mapped[str | None] = mapped_column(Text)
+    outro_path: Mapped[str | None] = mapped_column(Text)
+    output_path: Mapped[str | None] = mapped_column(Text)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class Clip(Base):
     __tablename__ = "clips"
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)

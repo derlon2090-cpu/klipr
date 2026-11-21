@@ -145,6 +145,15 @@ export type Vod = {
   created_at: string;
   updated_at: string;
 };
+export type StudioRender = {
+  id: string;
+  vod_id: string;
+  status: "queued" | "processing" | "ready" | "failed";
+  progress: number;
+  error: string | null;
+  download_url: string | null;
+  created_at: string | null;
+};
 const API = (process.env.NEXT_PUBLIC_API_URL || "/api").replace(/\/$/, "");
 
 function errorMessage(status: number, body: unknown): string {
@@ -283,6 +292,15 @@ export const api = {
   deleteVod: (id: string) => request<void>(`/vods/${id}`, { method: "DELETE" }),
   openVodInEditor: (id: string) => request<Stream>(`/vods/${id}/open-in-editor`, { method: "POST" }),
   generateVodClips: (id: string) => request<void>(`/vods/${id}/generate-clips`, { method: "POST", body: JSON.stringify({}) }),
+  createStudioRender: (vodId: string, assets: { thumbnail?: File | null; intro?: File | null; outro?: File | null }) => {
+    const body = new FormData();
+    body.append("vod_id", vodId);
+    if (assets.thumbnail) body.append("thumbnail", assets.thumbnail);
+    if (assets.intro) body.append("intro", assets.intro);
+    if (assets.outro) body.append("outro", assets.outro);
+    return upload<StudioRender>("/studio/renders", body);
+  },
+  studioRender: (id: string) => request<StudioRender>(`/studio/renders/${id}`),
   archiveShorts: () => request<ArchiveShort[]>("/archive/shorts"),
   stream: (id: string) => request<Stream>(`/streams/${id}`),
   preview: (stream_url: string) =>

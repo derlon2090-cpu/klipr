@@ -32,6 +32,7 @@ import {
   Credentials,
   Stream,
   StreamPreview,
+  StudioRender,
   Vod,
 } from "@/lib/api";
 import { DashboardSection, Shell } from "@/components/shell";
@@ -62,11 +63,14 @@ const emptyBranding: Branding = {
 const validSections: DashboardSection[] = [
   "live",
   "vods",
-  "archive",
+  "clips",
   "shorts",
   "suggestions",
-  "session",
+  "sessions",
   "presets",
+  "thumbnails",
+  "intro-outro",
+  "studio",
 ];
 const platformClass = (platform: string) =>
   platform === "twitch"
@@ -185,6 +189,12 @@ export default function Dashboard() {
   const [vodUrl, setVodUrl] = useState("");
   const [vodQuality, setVodQuality] = useState("best");
   const [vodBusy, setVodBusy] = useState(false);
+  const [studioVodId, setStudioVodId] = useState("");
+  const [studioThumbnail, setStudioThumbnail] = useState<File | null>(null);
+  const [studioIntro, setStudioIntro] = useState<File | null>(null);
+  const [studioOutro, setStudioOutro] = useState<File | null>(null);
+  const [studioRender, setStudioRender] = useState<StudioRender | null>(null);
+  const [studioBusy, setStudioBusy] = useState(false);
 
   const loadCredentials = () => api.credentials().then(setCredentials).catch(() => undefined);
 
@@ -244,16 +254,21 @@ export default function Dashboard() {
   }, []);
   useEffect(() => {
     if (section === "suggestions") loadSuggestions();
-    if (section === "session") loadCredentials();
+    if (section === "sessions") loadCredentials();
     if (section === "vods") loadVods();
   }, [section]);
+  useEffect(() => {
+    if (!studioRender || !["queued", "processing"].includes(studioRender.status)) return;
+    const timer = window.setInterval(() => api.studioRender(studioRender.id).then(setStudioRender).catch(() => undefined), 2500);
+    return () => window.clearInterval(timer);
+  }, [studioRender?.id, studioRender?.status]);
   useEffect(() => {
     if (section !== "vods" || !vods.some((vod) => !["ready", "failed"].includes(vod.status))) return;
     const timer = setInterval(loadVods, 2500);
     return () => clearInterval(timer);
   }, [section, vods]);
   useEffect(() => {
-    if (section !== "archive" || !streams.some((stream) => stream.status === "processing")) return;
+    if (section !== "clips" || !streams.some((stream) => stream.status === "processing")) return;
     const timer = setInterval(load, 3000);
     return () => clearInterval(timer);
   }, [section, streams]);
@@ -391,7 +406,7 @@ export default function Dashboard() {
     try {
       await api.generateVodClips(vod.id);
       await load();
-      changeSection("archive");
+      changeSection("clips");
       setMessage(ar ? "بدأ التحليل والتقطيع التلقائي. ستُحفظ المقاطع النهائية في الأرشيف." : "Automatic analysis and clipping started. Finished clips will appear in the archive.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not start automatic clips");
@@ -2064,6 +2079,49 @@ export default function Dashboard() {
     </>
   );
 
+  const startStudioRender = async () => {
+    if (!studioVodId) {
+      setMessage(ar ? "اختر بثاً جاهزاً من مكتبة البثوث أولاً." : "Select a ready VOD from the vault first.");
+      return;
+    }
+    setStudioBusy(true);
+    try {
+      const render = await api.createStudioRender(studioVodId, { thumbnail: studioThumbnail, intro: studioIntro, outro: studioOutro });
+      setStudioRender(render);
+      setMessage(ar ? "بدأ تجهيز المقطع — يمكنك متابعة التقدم هنا." : "Render started — follow its progress here.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : (ar ? "تعذّر بدء التجهيز." : "Could not start the render."));
+    } finally { setStudioBusy(false); }
+  };
+  const studioView = (
+    <>
+      <SectionTitle icon={Clapperboard} eyebrow={ar ? "استوديو الإنتاج" : "PRODUCTION STUDIO"} title={ar ? "الاستديو المتكامل" : "Production Studio"} description={ar ? "اختر بثاً محفوظاً، أضف أصولك من جهازك، ثم جهّز ملف MP4 موحداً وجاهزاً للتنزيل." : "Choose a vault VOD, add local assets, then render a normalized downloadable MP4."} />
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_390px]">
+        <section className="space-y-5 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <label className="block text-sm font-black">{ar ? "1. البث أو المقطع من مكتبة البثوث المحفوظة" : "1. VOD from the saved broadcast vault"}
+            <select value={studioVodId} onChange={(event) => setStudioVodId(event.target.value)} className={inputClass}>
+              <option value="">{ar ? "اختر بثاً جاهزاً" : "Choose a ready VOD"}</option>
+              {vods.filter((vod) => vod.status === "ready").map((vod) => <option key={vod.id} value={vod.id}>{vod.title || (ar ? "بث غير مسمى" : "Untitled broadcast")} · {vodDuration(vod.duration_seconds)}</option>)}
+            </select>
+          </label>
+          {studioVodId && (() => { const vod = vods.find((item) => item.id === studioVodId); return vod?.download_url ? <video controls className="aspect-video w-full rounded-xl bg-black" src={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${vod.download_url}`} /> : null; })()}
+          <div className="grid gap-4 md:grid-cols-3">
+            <AssetPicker label={ar ? "2. صورة الثامبنيل" : "2. Thumbnail image"} accept="image/png,image/jpeg,image/webp" file={studioThumbnail} onChange={setStudioThumbnail} hint="PNG / JPG / WebP · 12MB" />
+            <AssetPicker label={ar ? "فيديو المقدمة" : "Intro video"} accept="video/mp4,video/quicktime" file={studioIntro} onChange={setStudioIntro} hint="MP4 / MOV · optional" />
+            <AssetPicker label={ar ? "فيديو النهاية" : "Outro video"} accept="video/mp4,video/quicktime" file={studioOutro} onChange={setStudioOutro} hint="MP4 / MOV · optional" />
+          </div>
+          {studioThumbnail && <img src={URL.createObjectURL(studioThumbnail)} alt="Thumbnail preview" className="aspect-video max-w-sm rounded-xl border object-cover" />}
+          <button onClick={startStudioRender} disabled={studioBusy || !studioVodId} className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-3.5 font-black text-white disabled:opacity-50"><Sparkles size={18}/>{studioBusy ? (ar ? "جارٍ الحفظ…" : "Saving…") : (ar ? "حفظ وتجهيز المقطع" : "Save & Render")}</button>
+          <p className="text-xs leading-5 text-slate-500">{ar ? "توحيد تلقائي: 1920×1080، معدل الإطارات المصدر، صوت AAC بتردد 48kHz، ثم دمج المقدمة والبث والنهاية. تُدمج الصورة كغلاف MP4 رسمي." : "Automatic normalization: 1920×1080, source FPS, AAC 48kHz; then Intro + VOD + Outro. Your image is embedded as the MP4 cover."}</p>
+        </section>
+        <aside className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="font-black">{ar ? "حالة التجهيز" : "Render status"}</h2>
+          {studioRender ? <div className="mt-5"><div className="flex justify-between text-sm font-bold"><span>{studioRender.status === "ready" ? (ar ? "مكتمل" : "Ready") : studioRender.status === "failed" ? (ar ? "فشل" : "Failed") : (ar ? "قيد المعالجة" : "Processing")}</span><span>{Math.round(studioRender.progress)}%</span></div><div className="mt-2 h-3 overflow-hidden rounded-full bg-slate-100"><div className={`h-full rounded-full ${studioRender.status === "failed" ? "bg-rose-500" : "bg-emerald-500"}`} style={{width: `${studioRender.progress}%`}} /></div>{studioRender.error && <p className="mt-4 rounded-xl bg-rose-50 p-3 text-xs text-rose-700">{studioRender.error}</p>}{studioRender.download_url && <a href={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${studioRender.download_url}`} download className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 font-black text-white"><Download size={17}/>{ar ? "تنزيل المقطع النهائي MP4" : "Download final MP4"}</a>}</div> : <Empty text={ar ? "اختر بثاً وارفع الأصول، ثم اضغط حفظ وتجهيز." : "Choose a VOD, upload assets, then save and render."} />}
+        </aside>
+      </div>
+    </>
+  );
+
   const reviewSuggestion = async (item: CreatorSuggestion) => {
     try {
       const next = await api.updateCreatorSuggestion(
@@ -2339,13 +2397,19 @@ export default function Dashboard() {
       ? liveView
       : section === "vods"
         ? vodsView
-      : section === "archive"
+      : section === "clips"
         ? archiveView
         : section === "presets"
           ? presetsView
+        : section === "thumbnails"
+          ? thumbnailView
+        : section === "intro-outro"
+          ? brandingView
+        : section === "studio"
+          ? studioView
         : section === "shorts"
           ? shortsView
-          : section === "session" ? sessionView : suggestionsView;
+          : section === "sessions" ? sessionView : suggestionsView;
   return (
     <Shell
       activeCount={active.length}
@@ -2353,10 +2417,10 @@ export default function Dashboard() {
       onSectionChange={changeSection}
     >
       <div className="mx-auto max-w-[1500px]">
-        {hasExpiredSession && section !== "session" && (
+        {hasExpiredSession && section !== "sessions" && (
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-900">
             <span>{ar ? "انتهت صلاحية جلسة البث — جدّدها للاستمرار بجودة 1080p60." : "A stream session expired — renew it to continue 1080p60 capture."}</span>
-            <button onClick={() => changeSection("session")} className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-black text-white">{ar ? "تجديد الجلسة الآن" : "Renew session now"}</button>
+            <button onClick={() => changeSection("sessions")} className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-black text-white">{ar ? "تجديد الجلسة الآن" : "Renew session now"}</button>
           </div>
         )}
         {message && (
@@ -2407,4 +2471,12 @@ export default function Dashboard() {
 
 function ClapperboardIcon(props: React.ComponentProps<typeof Film>) {
   return <Film {...props} />;
+}
+
+function AssetPicker({ label, accept, file, onChange, hint }: { label: string; accept: string; file: File | null; onChange: (file: File | null) => void; hint: string }) {
+  return <label className="block rounded-xl border border-dashed border-slate-300 p-4 text-sm font-black transition hover:border-emerald-400 hover:bg-emerald-50">
+    <span className="flex items-center gap-2"><Upload size={17} className="text-emerald-600"/>{label}</span>
+    <span className="mt-3 block truncate rounded-lg bg-slate-50 px-3 py-2 text-xs font-medium text-slate-500">{file?.name || hint}</span>
+    <input type="file" accept={accept} className="hidden" onChange={(event) => onChange(event.target.files?.[0] || null)} />
+  </label>;
 }

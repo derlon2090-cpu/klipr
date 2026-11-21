@@ -12,9 +12,9 @@ from pathlib import Path
 from html import unescape
 from urllib.request import HTTPRedirectHandler, Request as UrlRequest, build_opener
 from urllib.parse import urlparse, urlunparse
-from uuid import UUID
+from uuid import UUID, uuid4
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, text
@@ -24,11 +24,12 @@ from redis.exceptions import RedisError
 from app.db import Base, SessionLocal, engine
 from app.migrations import apply_migrations
 from app.config import get_settings
-from app.models import ArchiveBranding, Clip, CreatorSuggestion, Notification, SavedThumbnail, SessionCredential, Stream, StreamStatus, Vod, VodStatus, WatchlistSubscription
+from app.models import ArchiveBranding, Clip, CreatorSuggestion, Notification, SavedThumbnail, SessionCredential, Stream, StreamStatus, StudioRender, Vod, VodStatus, WatchlistSubscription
 from app.storage import StorageUnavailable, copy_file, delete_files, presigned_download_url, r2_client, upload_file
 from app.worker.tasks import WORK_ROOT, active_key, redis_client, stop_key, task_key
 from app.worker.celery_app import WORKER_HEARTBEAT_KEY, celery_app
 from app.worker.vods import extract_vod_metadata
+from app.worker.studio import render_studio
 from app.api.credentials import router as credentials_router
 
 app = FastAPI(title="Klipr.cloud API", description="On-demand creator stream capture and AI clip studio.", version="0.3.0")
@@ -303,6 +304,31 @@ class EmailRequest(BaseModel): email: str
 class VodImportRequest(BaseModel):
     url: str = Field(min_length=12, max_length=2000)
     quality: str = "best"
+
+
+def studio_render_data(item: StudioRender) -> dict:
+    return {"id": str(item.id), "vod_id": str(item.vod_id), "status": item.status,
+            "progress": item.progress, "error": item.error_message,
+            "download_url": f"/studio/renders/{item.id}/download" if item.status == "ready" and item.output_path else None,
+            "created_at": item.created_at.isoformat() if item.created_at else None}
+
+
+async def _save_studio_upload(file: UploadFile | None, destination: Path, allowed: set[str], maximum: int) -> str | None:
+    if file is None or not file.filename:
+        return None
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in allowed:
+        raise HTTPException(422, f"Unsupported file type: {suffix or 'unknown'}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    total = 0
+    with destination.open("wb") as output:
+        while chunk := await file.read(1024 * 1024):
+            total += len(chunk)
+            if total > maximum:
+                output.close(); destination.unlink(missing_ok=True)
+                raise HTTPException(413, "The uploaded file is too large")
+            output.write(chunk)
+    return str(destination)
 
 WEBHOOK_RE = re.compile(r"^https://(?:discord\.com|discordapp\.com)/api/webhooks/[0-9]+/[A-Za-z0-9_-]+(?:\?.*)?$")
 
@@ -618,6 +644,64 @@ def delete_vod(vod_id: UUID):
         storage_keys = [key for key in (item.storage_key, item.thumbnail_key) if key]
         db.delete(item); db.commit()
     delete_files(storage_keys)
+
+
+@app.post("/studio/renders", status_code=202)
+async def create_studio_render(
+    vod_id: UUID = Form(...),
+    thumbnail: UploadFile | None = File(None),
+    intro: UploadFile | None = File(None),
+    outro: UploadFile | None = File(None),
+):
+    """Persist local assets then dispatch an isolated FFmpeg normalization job."""
+    with SessionLocal() as db:
+        vod = db.get(Vod, vod_id)
+        if vod is None or vod.status != VodStatus.ready or not vod.storage_key:
+            raise HTTPException(409, "Select a ready VOD from the vault first")
+        render = StudioRender(vod_id=vod_id, status="queued", progress=0)
+        db.add(render); db.commit(); db.refresh(render)
+        render_id = render.id
+    folder = Path("/var/lib/klipr/studio") / str(render_id)
+    try:
+        thumb_path = await _save_studio_upload(thumbnail, folder / "thumbnail", {".png", ".jpg", ".jpeg", ".webp"}, 12 * 1024 * 1024)
+        intro_path = await _save_studio_upload(intro, folder / "intro.mp4", {".mp4", ".mov"}, 20 * 1024 * 1024 * 1024)
+        outro_path = await _save_studio_upload(outro, folder / "outro.mp4", {".mp4", ".mov"}, 20 * 1024 * 1024 * 1024)
+        with SessionLocal() as db:
+            item = db.get(StudioRender, render_id)
+            item.thumbnail_path, item.intro_path, item.outro_path = thumb_path, intro_path, outro_path
+            db.commit(); db.refresh(item)
+            response = studio_render_data(item)
+        render_studio.delay(str(render_id))
+        return response
+    except HTTPException:
+        with SessionLocal() as db:
+            item = db.get(StudioRender, render_id)
+            if item: db.delete(item); db.commit()
+        raise
+    except Exception as error:
+        with SessionLocal() as db:
+            item = db.get(StudioRender, render_id)
+            if item: item.status = "failed"; item.error_message = str(error)[:1000]; db.commit()
+        raise HTTPException(500, "Unable to save studio assets") from error
+
+
+@app.get("/studio/renders/{render_id}")
+def studio_render_status(render_id: UUID):
+    with SessionLocal() as db:
+        item = db.get(StudioRender, render_id)
+        if item is None: raise HTTPException(404, "Studio render not found")
+        return studio_render_data(item)
+
+
+@app.get("/studio/renders/{render_id}/download")
+def download_studio_render(render_id: UUID):
+    with SessionLocal() as db:
+        item = db.get(StudioRender, render_id)
+        if item is None or item.status != "ready" or not item.output_path:
+            raise HTTPException(404, "The final render is not ready")
+        output = Path(item.output_path)
+    if not output.is_file(): raise HTTPException(404, "The final render file is unavailable")
+    return FileResponse(output, media_type="video/mp4", filename=f"klipr-studio-{render_id}.mp4")
 
 def _ensure_preset_schema(db):
     # Lazy, idempotent upgrade keeps existing deployments compatible without
