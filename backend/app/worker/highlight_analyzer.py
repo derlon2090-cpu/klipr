@@ -143,7 +143,10 @@ def transcribe_candidates(wav_path: Path, candidates: list[Candidate], scratch: 
 
 
 def analyze_highlights(wav_path: Path, scratch: Path, target_seconds: int = 45, max_clips: int = 3) -> list[Highlight]:
-    candidates, duration = detect_peak_windows(wav_path, target_seconds, min(40, max(25, max_clips * 8)))
+    # Transcribing 25-40 full candidates made a 25-minute VOD appear stuck for
+    # many minutes on a CPU worker. A focused 2x shortlist preserves ranking
+    # quality while returning the first finished set substantially sooner.
+    candidates, duration = detect_peak_windows(wav_path, target_seconds, min(18, max(8, max_clips * 2)))
     transcriptions = transcribe_candidates(wav_path, candidates, scratch)
     ranked: list[Highlight] = []
     for index, candidate in enumerate(candidates):

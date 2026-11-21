@@ -127,6 +127,38 @@ def add_intro_thumbnail(video: Path, thumbnail: Path, destination: Path) -> None
     """Show the saved 9:16 cover over the opening 0.8 seconds."""
     run(["ffmpeg", "-y", "-i", str(video), "-loop", "1", "-i", str(thumbnail), "-filter_complex", "[1:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[cover];[0:v][cover]overlay=0:0:enable='lt(t,0.8)'[v]", "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-c:a", "copy", "-shortest", "-movflags", "+faststart", str(destination)])
 
+def compact_waiting_gaps(video: Path, words: tuple[Word, ...], start: float, duration: float, destination: Path) -> bool:
+    """Remove long pauses while retaining natural breathing room around speech."""
+    local = sorted((max(0.0, word.start - start), min(duration, word.end - start)) for word in words)
+    cuts: list[tuple[float, float]] = []
+    cursor = 0.0
+    for word_start, word_end in local:
+        if word_start - cursor >= 1.4:
+            cuts.append((cursor + 0.35, word_start - 0.35))
+        cursor = max(cursor, word_end)
+    if duration - cursor >= 1.4:
+        cuts.append((cursor + 0.35, duration))
+    cuts = [(left, right) for left, right in cuts if right - left >= 0.55]
+    if not cuts:
+        return False
+    keep: list[tuple[float, float]] = []
+    cursor = 0.0
+    for left, right in cuts:
+        if left > cursor + 0.1: keep.append((cursor, left))
+        cursor = right
+    if cursor < duration - 0.1: keep.append((cursor, duration))
+    if not keep:
+        return False
+    parts: list[str] = []
+    inputs: list[str] = []
+    for index, (left, right) in enumerate(keep):
+        parts.append(f"[0:v]trim=start={left:.3f}:end={right:.3f},setpts=PTS-STARTPTS[v{index}]")
+        parts.append(f"[0:a]atrim=start={left:.3f}:end={right:.3f},asetpts=PTS-STARTPTS[a{index}]")
+        inputs.append(f"[v{index}][a{index}]")
+    graph = ";".join(parts + [f"{''.join(inputs)}concat=n={len(keep)}:v=1:a=1[v][a]"])
+    run(["ffmpeg", "-y", "-i", str(video), "-filter_complex", graph, "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-c:a", "aac", "-movflags", "+faststart", str(destination)])
+    return True
+
 def add_editing_overlay(video: Path, logo: Path | None, creator_name: str | None, position: str, destination: Path) -> None:
     """Burn a compact pill identity overlay into a vertical export.
 
@@ -186,6 +218,11 @@ def process_stream_highlights(stream_id: str, max_clips: int = 3) -> None:
         if overlay_logo_key:
             overlay_logo = job_dir / f"overlay-logo{Path(overlay_logo_key).suffix or '.png'}"
             download_file(overlay_logo_key, overlay_logo)
+        from .branding import append_outro, prepend_intro, render_short_outro, render_sponsor_intro
+        bumper = job_dir / "klipr-sponsor-intro.mp4"
+        outro = job_dir / "klipr-short-outro.mp4"
+        render_sponsor_intro(bumper, overlay_creator_name or "Klipr Stream Archive")
+        render_short_outro(outro, overlay_creator_name or "Klipr Stream Archive")
         extract_audio(vod, wav)
         highlights = analyze_highlights(wav, job_dir / "candidate-audio", target_seconds, max_clips)
         with SessionLocal() as db:
@@ -198,21 +235,20 @@ def process_stream_highlights(stream_id: str, max_clips: int = 3) -> None:
                 snippet = write_ass(list(highlight.words), window.start, window.end, ass)
                 raw_output = job_dir / f"highlight-{index}-raw.mp4"
                 render_vertical(vod, ass, window, raw_output, layout_mode)
+                compact_output = job_dir / f"highlight-{index}-compact.mp4"
+                branded_source = compact_output if compact_waiting_gaps(raw_output, highlight.words, window.start, window.end-window.start, compact_output) else raw_output
                 # Preserve a user's source cover as a brief opening frame, then
                 # always apply the approved eight-second sponsor bumper.
-                branded_source = raw_output
                 if intro_thumbnail:
                     cover_output = job_dir / f"highlight-{index}-cover.mp4"
-                    add_intro_thumbnail(raw_output, intro_thumbnail, cover_output)
+                    add_intro_thumbnail(branded_source, intro_thumbnail, cover_output)
                     branded_source = cover_output
                 overlay_output = job_dir / f"highlight-{index}-overlay.mp4"
                 add_editing_overlay(branded_source, overlay_logo, overlay_creator_name, overlay_position, overlay_output)
                 branded_source = overlay_output
-                from .branding import prepend_intro, render_sponsor_intro
-                bumper = job_dir / "klipr-sponsor-intro.mp4"
-                if not bumper.exists():
-                    render_sponsor_intro(bumper)
-                prepend_intro(bumper, branded_source, output)
+                intro_output = job_dir / f"highlight-{index}-intro.mp4"
+                prepend_intro(bumper, branded_source, intro_output)
+                append_outro(intro_output, outro, output)
                 if remove_music:
                     from .audio_clean import clean_vocal_audio
                     cleaned_output = job_dir / f"highlight-{index}-vocals.mp4"

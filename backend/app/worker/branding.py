@@ -8,7 +8,17 @@ from .thumbnails import _font
 
 
 INTRO_SECONDS = 8
+OUTRO_SECONDS = 2
 REFERENCE_ART = Path(__file__).resolve().parents[1] / "assets" / "klipr-sponsor-intro.jpg"
+
+
+CONCAT_FILTER = (
+    "[0:v]scale=1080:1920,setsar=1,fps=30,format=yuv420p[v0];"
+    "[1:v]scale=1080:1920,setsar=1,fps=30,format=yuv420p[v1];"
+    "[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a0];"
+    "[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a1];"
+    "[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]"
+)
 
 
 def render_sponsor_intro(destination: Path, channel: str = "Klipr Stream Archive") -> None:
@@ -48,6 +58,33 @@ def prepend_intro(intro: Path, clip: Path, destination: Path) -> None:
     """Join the bumper and vertical clip while normalising both audio streams."""
     subprocess.run([
         "ffmpeg", "-y", "-i", str(intro), "-i", str(clip), "-filter_complex",
-        "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[v][a]", "-map", "[v]", "-map", "[a]",
+        CONCAT_FILTER, "-map", "[v]", "-map", "[a]",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-c:a", "aac", "-movflags", "+faststart", str(destination),
+    ], check=True, shell=False)
+
+
+def render_short_outro(destination: Path, channel: str = "Klipr Stream Archive") -> None:
+    """Render a concise portrait end card for every exported Short."""
+    canvas = Image.new("RGB", (1080, 1920), "#03120e")
+    draw = ImageDraw.Draw(canvas)
+    green, white = "#21e89b", "#ffffff"
+    draw.rounded_rectangle((105, 610, 975, 1285), radius=64, fill="#071f18", outline=green, width=6)
+    draw.text((540, 760), "KLIPR.CLOUD", anchor="mm", font=_font(66), fill=green)
+    draw.text((540, 920), channel[:48], anchor="mm", font=_font(44), fill=white)
+    draw.text((540, 1070), "تابع • شارك • اشترك", anchor="mm", font=_font(38), fill=white)
+    draw.text((540, 1190), "FOLLOW • SHARE • SUBSCRIBE", anchor="mm", font=_font(25), fill=green)
+    still = destination.with_suffix(".png")
+    canvas.save(still)
+    subprocess.run([
+        "ffmpeg", "-y", "-loop", "1", "-i", str(still), "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+        "-t", str(OUTRO_SECONDS), "-r", "30", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(destination),
+    ], check=True, shell=False)
+    still.unlink(missing_ok=True)
+
+
+def append_outro(clip: Path, outro: Path, destination: Path) -> None:
+    subprocess.run([
+        "ffmpeg", "-y", "-i", str(clip), "-i", str(outro), "-filter_complex",
+        CONCAT_FILTER, "-map", "[v]", "-map", "[a]",
         "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-c:a", "aac", "-movflags", "+faststart", str(destination),
     ], check=True, shell=False)

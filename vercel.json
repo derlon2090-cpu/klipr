@@ -14,9 +14,7 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": {
-        "service": "api"
-      }
+      "destination": "http://13.49.70.12:8000/api/$1"
     },
     {
       "source": "/(.*)",

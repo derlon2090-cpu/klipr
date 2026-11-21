@@ -579,7 +579,9 @@ def open_vod_in_editor(vod_id: UUID):
         if not item.storage_key: raise HTTPException(409, "VOD file is not ready")
         branding = _branding(db)
         stream = Stream(source_url=item.source_url, platform=item.platform, status=StreamStatus.ready,
-                        started_at=item.created_at, ended_at=item.updated_at,
+                        started_at=item.created_at, ended_at=item.updated_at, remove_music=branding.remove_music,
+                        enable_end_screen=branding.enable_end_screen, archive_channel_name=branding.archive_channel_name,
+                        archive_tagline=branding.archive_tagline, outro_duration_seconds=branding.outro_duration_seconds,
                         overlay_creator_name=branding.overlay_creator_name, overlay_position=branding.overlay_position)
         db.add(stream); db.flush()
         key = f"streams/{stream.id}/master.mp4"
@@ -593,6 +595,10 @@ def open_vod_in_editor(vod_id: UUID):
             suffix = Path(branding.overlay_logo_key).suffix or ".png"
             stream.overlay_logo_key = f"streams/{stream.id}/overlay-logo{suffix}"
             copy_file(branding.overlay_logo_key, stream.overlay_logo_key)
+        if branding.default_short_thumbnail_key:
+            suffix = Path(branding.default_short_thumbnail_key).suffix or ".png"
+            stream.short_thumbnail_key = f"streams/{stream.id}/short-thumbnail{suffix}"
+            copy_file(branding.default_short_thumbnail_key, stream.short_thumbnail_key)
         db.commit(); db.refresh(stream)
         return stream_data(stream)
 

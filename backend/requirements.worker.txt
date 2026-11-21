@@ -2,9 +2,14 @@
 -r requirements.txt
 streamlink==7.1.2
 faster-whisper==1.1.0
+# PyAV 19 removed metadata_errors while faster-whisper 1.1 still passes it.
+av<19
 numpy==2.2.0
 opencv-python-headless==4.10.0.84
 Pillow==11.0.0
 arabic-reshaper==3.0.0
 python-bidi==0.6.3
 demucs==4.0.1
+# Current Torchaudio delegates WAV writes to TorchCodec; Demucs needs it to
+# persist the separated vocal stem. 0.17 supports the worker's recent Torch.
+torchcodec==0.17.0
