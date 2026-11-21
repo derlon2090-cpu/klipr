@@ -180,7 +180,7 @@ def import_vod(self, vod_id: str) -> None:
         thumbnail_path = _save_thumbnail(thumbnail_url, directory)
         _update(identifier, title=title, streamer_name=uploader, duration_seconds=duration,
                 thumbnail_url=thumbnail_url, thumbnail_path=thumbnail_path,
-                status=VodStatus.downloading, progress=1)
+                status=VodStatus.downloading, progress=1, error_message=None)
 
         template = str(directory / "source.%(ext)s")
         format_selector = "best" if quality == "best" else quality
