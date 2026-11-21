@@ -85,28 +85,61 @@ def extract_vod_metadata(url: str, timeout: int = 45) -> dict:
     return json.loads(completed.stdout)
 
 
-def _session_download_options(platform: str, directory: Path) -> tuple[list[str], Path | None]:
-    """Convert an encrypted Session Vault entry into private yt-dlp flags."""
+def _session_download_options(platform: str, directory: Path) -> tuple[list[str], Path | None, dict[str, str]]:
+    """Convert an encrypted Session Vault entry into yt-dlp and HTTP headers."""
     if platform not in {"kick", "twitch"}:
-        return [], None
+        return [], None, {}
     with SessionLocal() as db:
         credential = db.get(SessionCredential, platform)
         if not credential or credential.status != "active" or not credential.session_encrypted:
-            return [], None
+            return [], None, {}
         if credential.expires_at and credential.expires_at <= datetime.now(timezone.utc):
             credential.status = "expired"
             db.commit()
-            return [], None
+            return [], None, {}
         plaintext = decrypt_secret(credential.session_encrypted)
     if "\t" in plaintext:
         cookie_file = directory / f"{platform}_cookies.txt"
         cookie_file.write_text(plaintext, encoding="utf-8")
         os.chmod(cookie_file, 0o600)
-        return ["--cookies", str(cookie_file)], cookie_file
+        cookies = []
+        for line in plaintext.splitlines():
+            if line.startswith("#") or "\t" not in line:
+                continue
+            columns = line.split("\t")
+            if len(columns) >= 7:
+                cookies.append(f"{columns[5]}={columns[6]}")
+        headers = {"Cookie": "; ".join(cookies)} if cookies else {}
+        return ["--cookies", str(cookie_file)], cookie_file, headers
     if plaintext.lower().startswith("bearer "):
-        return ["--add-headers", f"Authorization:{plaintext}"], None
+        return ["--add-headers", f"Authorization:{plaintext}"], None, {"Authorization": plaintext}
     cookie_header = plaintext if "=" in plaintext else f"kick_session={plaintext}"
-    return ["--add-headers", f"Cookie:{cookie_header}"], None
+    return ["--add-headers", f"Cookie:{cookie_header}"], None, {"Cookie": cookie_header}
+
+
+def _kick_playback_url(url: str, request_headers: dict[str, str], timeout: int = 15) -> str:
+    """Resolve a Kick page once, then download its signed HLS URL directly."""
+    match = _KICK_VIDEO.match(url)
+    if not match:
+        return url
+    headers = {"User-Agent": "Mozilla/5.0 Klipr.cloud/1.0", **request_headers}
+    payload = {
+        "video_player": {"player": {}},
+        "video_session": {},
+        "user_session": {"non_personalised_ads": True},
+    }
+    response = requests.post(
+        f"{_KICK_API}/stream/{match.group(1)}/playback",
+        json=payload,
+        headers=headers,
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    playback = response.json().get("playback_url") or {}
+    resolved = playback.get("vod") if isinstance(playback, dict) else playback
+    if not resolved:
+        raise RuntimeError("Kick did not return a playable VOD URL. Check the saved session.")
+    return str(resolved)
 
 
 def _save_thumbnail(url: str | None, directory: Path) -> str | None:
@@ -151,7 +184,8 @@ def import_vod(self, vod_id: str) -> None:
 
         template = str(directory / "source.%(ext)s")
         format_selector = "best" if quality == "best" else quality
-        session_options, cookie_file = _session_download_options(platform, directory)
+        session_options, cookie_file, request_headers = _session_download_options(platform, directory)
+        download_url = _kick_playback_url(source_url, request_headers) if platform == "kick" else source_url
         command = [
             "yt-dlp", "--force-ipv4", "--no-playlist", "--newline", "--no-part", "--concurrent-fragments", "8",
             "--merge-output-format", "mp4", "--format", format_selector,
@@ -159,7 +193,7 @@ def import_vod(self, vod_id: str) -> None:
             "--output", template,
         ]
         command.extend(session_options)
-        command.append(source_url)
+        command.append(download_url)
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                    text=True, bufsize=1)
         assert process.stdout is not None

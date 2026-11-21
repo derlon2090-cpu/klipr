@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 from app.main import _vod_is_stale
 from app.models import VodStatus
 from app.worker.celery_app import celery_redis_url
-from app.worker.vods import _session_download_options, extract_vod_metadata
+from app.worker.vods import _kick_playback_url, _session_download_options, extract_vod_metadata
 
 
 def test_metadata_extraction_is_bounded_and_download_free():
@@ -46,9 +46,10 @@ def test_raw_kick_cookie_is_not_prefixed_twice(tmp_path):
     database.__enter__.return_value = database
     database.get.return_value = credential
     with patch("app.worker.vods.SessionLocal", return_value=database), patch("app.worker.vods.decrypt_secret", return_value="kick_session=secret"):
-        options, cookie_file = _session_download_options("kick", tmp_path)
+        options, cookie_file, headers = _session_download_options("kick", tmp_path)
     assert options == ["--add-headers", "Cookie:kick_session=secret"]
     assert cookie_file is None
+    assert headers == {"Cookie": "kick_session=secret"}
 
 
 def test_celery_requires_verified_tls_for_managed_redis():
@@ -56,6 +57,20 @@ def test_celery_requires_verified_tls_for_managed_redis():
         "rediss://user:secret@example.test:6380/0?ssl_cert_reqs=required"
     )
     assert celery_redis_url("redis://localhost:6379/0") == "redis://localhost:6379/0"
+
+
+def test_kick_download_resolves_signed_hls_url_directly():
+    response = SimpleNamespace(
+        json=lambda: {"playback_url": {"vod": "https://cdn.test/master.m3u8"}},
+        raise_for_status=lambda: None,
+    )
+    with patch("app.worker.vods.requests.post", return_value=response) as post:
+        resolved = _kick_playback_url(
+            "https://kick.com/creator/videos/01a1f636-d8c0-74ed-b037-527fce8487ef",
+            {"Cookie": "kick_session=secret"},
+        )
+    assert resolved == "https://cdn.test/master.m3u8"
+    assert post.call_args.kwargs["headers"]["Cookie"] == "kick_session=secret"
 
 
 def test_vod_job_is_marked_stale_after_twenty_minutes():
