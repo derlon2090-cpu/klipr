@@ -25,9 +25,9 @@ from app.migrations import apply_migrations
 from app.config import get_settings
 from app.models import ArchiveBranding, Clip, CreatorSuggestion, Notification, SavedThumbnail, SessionCredential, Stream, StreamStatus, Vod, VodStatus, WatchlistSubscription
 from app.storage import StorageUnavailable, copy_file, delete_files, presigned_download_url, r2_client, upload_file
-from app.worker.tasks import WORK_ROOT, active_key, record_stream, redis_client, stop_key, task_key
-from app.worker.celery_app import WORKER_HEARTBEAT_KEY
-from app.worker.vods import extract_vod_metadata, import_vod
+from app.worker.tasks import WORK_ROOT, active_key, redis_client, stop_key, task_key
+from app.worker.celery_app import WORKER_HEARTBEAT_KEY, celery_app
+from app.worker.vods import extract_vod_metadata
 from app.api.credentials import router as credentials_router
 
 app = FastAPI(title="Klipr.cloud API", description="On-demand creator stream capture and AI clip studio.", version="0.3.0")
@@ -508,7 +508,7 @@ def create_vod_import(payload: VodImportRequest):
         db.commit(); db.refresh(vod)
         response = vod_data(vod)
     try:
-        import_vod.delay(str(vod.id))
+        celery_app.send_task("app.worker.vods.import_vod", args=[str(vod.id)])
     except Exception as error:
         with SessionLocal() as db:
             failed = db.get(Vod, vod.id)
@@ -899,7 +899,7 @@ def record(payload: RecordRequest, request: Request):
                 db.delete(stream); db.commit()
                 raise HTTPException(429, {"detail": "Maximum of two active recordings reached"})
         client.set(lock, str(stream.id), xx=True, ex=43200)
-        task = record_stream.delay(str(stream.id), normalized, owner_key); client.sadd(task_key(str(stream.id)), task.id); client.expire(task_key(str(stream.id)), 43200)
+        task = celery_app.send_task("app.worker.tasks.record_stream", args=[str(stream.id), normalized, owner_key]); client.sadd(task_key(str(stream.id)), task.id); client.expire(task_key(str(stream.id)), 43200)
         return stream_data(stream)
     except Exception:
         client.delete(lock)
@@ -989,8 +989,7 @@ async def twitch_eventsub_webhook(request: Request):
     except Exception:
         pass
     if message_type == "notification" and body.get("subscription", {}).get("type") == "stream.online":
-        from app.worker.watcher import handle_twitch_stream_online
-        handle_twitch_stream_online.delay(body.get("event") or {})
+        celery_app.send_task("app.worker.watcher.handle_twitch_stream_online", args=[body.get("event") or {}])
     elif message_type == "revocation":
         revoked_id = body.get("subscription", {}).get("id")
         if revoked_id:
@@ -1086,8 +1085,7 @@ def process_stream(stream_id: UUID, payload: ProcessRequest = ProcessRequest()):
                 copy_file(branding.default_short_thumbnail_key, stream.short_thumbnail_key)
         db.commit()
     # Keep the Vercel API package lean; the Whisper worker imports this only in its own container.
-    from app.worker.highlights import process_stream_highlights
-    task = process_stream_highlights.delay(str(stream_id), payload.max_clips)
+    task = celery_app.send_task("app.worker.highlights.process_stream_highlights", args=[str(stream_id), payload.max_clips])
     redis_client().sadd(task_key(str(stream_id)), task.id); redis_client().expire(task_key(str(stream_id)), 43200)
     return {"id": str(stream_id), "status": StreamStatus.processing}
 
@@ -1111,7 +1109,6 @@ def delete_recording(stream_id: UUID):
         keys = [key for key in [stream.master_key, stream.thumbnail_key, stream.short_thumbnail_key, stream.archive_logo_key] + [value for clip in clips for value in (clip.vertical_key, clip.thumbnail_key, clip.captions_key)] if key]
         source_url = stream.source_url
         try:
-            from app.worker.celery_app import celery_app
             for task_id in redis_client().smembers(task_key(sid)): celery_app.control.revoke(task_id, terminate=True)
         finally:
             client = redis_client(); client.set(stop_key(sid), "1", ex=300); client.delete(active_key(source_url), task_key(sid))
