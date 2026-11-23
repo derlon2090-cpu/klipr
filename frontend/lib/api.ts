@@ -305,9 +305,10 @@ export const api = {
     }),
   streams: () => request<Stream[]>("/streams"),
   vods: () => request<Vod[]>("/vods"),
-  importVod: (url: string, quality: "original" | "4k_upscale" = "original") =>
+  importVod: (url: string, quality: "fast" | "original" | "4k_upscale" = "fast") =>
     request<Vod>("/vods/import", { method: "POST", body: JSON.stringify({ url, quality }) }),
   vodStatus: (id: string) => request<Vod>(`/vods/status/${id}`),
+  cancelVod: (id: string) => request<Vod>(`/vods/${id}/cancel`, { method: "POST" }),
   deleteVod: (id: string) => request<void>(`/vods/${id}`, { method: "DELETE" }),
   openVodInEditor: (id: string) => request<Stream>(`/vods/${id}/open-in-editor`, { method: "POST" }),
   generateVodClips: (id: string) => request<void>(`/vods/${id}/generate-clips`, { method: "POST", body: JSON.stringify({}) }),

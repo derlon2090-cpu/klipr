@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import secrets
+import shutil
 import time
 import re
 import threading
@@ -454,6 +455,44 @@ def _expire_stale_vod(db, vod: Vod) -> None:
     vod.eta_seconds = None
     db.commit()
 
+
+def _vod_task_key(vod_id: UUID) -> str:
+    return f"klipr:vod:task:{vod_id}"
+
+
+def _find_vod_task(vod_id: UUID) -> str | None:
+    """Return the queued/running Celery task id, including legacy jobs."""
+    try:
+        value = redis_client().get(_vod_task_key(vod_id))
+        if value:
+            return value.decode() if isinstance(value, bytes) else str(value)
+    except RedisError:
+        pass
+    try:
+        inspector = celery_app.control.inspect(timeout=2)
+        groups = (inspector.active() or {}, inspector.reserved() or {}, inspector.scheduled() or {})
+        for group in groups:
+            for tasks in group.values():
+                for task in tasks:
+                    request = task.get("request", task)
+                    args = request.get("args") or task.get("args") or []
+                    if str(vod_id) in str(args):
+                        return str(request.get("id") or task.get("id"))
+    except Exception:
+        pass
+    return None
+
+
+def _cancel_vod_task(vod_id: UUID) -> bool:
+    task_id = _find_vod_task(vod_id)
+    if task_id:
+        celery_app.control.revoke(task_id, terminate=True, signal="SIGTERM")
+    try:
+        redis_client().delete(_vod_task_key(vod_id))
+    except RedisError:
+        pass
+    return bool(task_id)
+
 def _meta_tag(page: str, property_name: str) -> str | None:
     # Provider page is not trusted markup; return only a bounded, decoded meta value.
     match = re.search(r'<meta[^>]+(?:property|name)=["\']' + re.escape(property_name) + r'["\'][^>]+content=["\']([^"\']+)', page, re.I)
@@ -534,8 +573,8 @@ def readiness():
 def create_vod_import(payload: VodImportRequest):
     platform, normalized_url = normalize_vod_url(payload.url)
     quality = payload.quality.strip().lower() or "original"
-    if quality not in {"original", "4k_upscale"}:
-        raise HTTPException(422, "quality must be original or 4k_upscale")
+    if quality not in {"fast", "original", "4k_upscale"}:
+        raise HTTPException(422, "quality must be fast, original or 4k_upscale")
     try:
         info = extract_vod_metadata(normalized_url)
     except Exception as error:
@@ -581,7 +620,11 @@ def create_vod_import(payload: VodImportRequest):
         db.commit(); db.refresh(vod)
         response = vod_data(vod)
     try:
-        celery_app.send_task("app.worker.vods.import_vod", args=[str(vod.id)])
+        task = celery_app.send_task("app.worker.vods.import_vod", args=[str(vod.id)])
+        try:
+            redis_client().set(_vod_task_key(vod.id), task.id, ex=86400)
+        except RedisError:
+            pass
     except Exception as error:
         with SessionLocal() as db:
             failed = db.get(Vod, vod.id)
@@ -608,6 +651,24 @@ def vod_status(job_id: UUID):
         if item is None: raise HTTPException(404, "VOD job not found")
         _expire_stale_vod(db, item)
         return vod_data(item)
+
+
+@app.post("/vods/{vod_id}/cancel")
+def cancel_vod(vod_id: UUID):
+    with SessionLocal() as db:
+        item = db.get(Vod, vod_id)
+        if item is None: raise HTTPException(404, "VOD not found")
+        if item.status == VodStatus.ready: raise HTTPException(409, "The VOD is already ready")
+        _cancel_vod_task(vod_id)
+        item.status = VodStatus.failed
+        item.error_message = "تم إلغاء المعالجة فورياً بواسطة المستخدم."
+        item.download_speed = None
+        item.eta_seconds = None
+        db.commit(); db.refresh(item)
+        response = vod_data(item)
+    time.sleep(0.4)
+    shutil.rmtree(Path("/var/lib/klipr/vods") / str(vod_id), ignore_errors=True)
+    return response
 
 
 @app.get("/vods/{vod_id}/download")
@@ -670,12 +731,15 @@ def generate_vod_clips(vod_id: UUID, payload: ProcessRequest = ProcessRequest())
 
 @app.delete("/vods/{vod_id}", status_code=204)
 def delete_vod(vod_id: UUID):
+    _cancel_vod_task(vod_id)
     with SessionLocal() as db:
         item = db.get(Vod, vod_id)
         if item is None: raise HTTPException(404, "VOD not found")
         storage_keys = [key for key in (item.storage_key, item.thumbnail_key) if key]
         db.delete(item); db.commit()
     delete_files(storage_keys)
+    time.sleep(0.2)
+    shutil.rmtree(Path("/var/lib/klipr/vods") / str(vod_id), ignore_errors=True)
 
 
 @app.post("/studio/renders", status_code=202)

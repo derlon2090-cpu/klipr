@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.request import Request, urlopen
@@ -18,7 +19,6 @@ from app.models import SessionCredential, Vod, VodStatus
 from app.storage import upload_file
 
 VOD_ROOT = Path("/var/lib/klipr/vods")
-_PROGRESS = re.compile(r"^download:\s*([\d.]+)%\|([^|]*)\|([^|]*)$")
 _KICK_VIDEO = re.compile(r"^https?://(?:www\.)?kick\.com/[^/]+/videos/([0-9a-f-]{36})(?:[/?#]|$)", re.I)
 _KICK_API = "https://web.kick.com/api/v1"
 
@@ -31,6 +31,25 @@ def _update(vod_id: UUID, **fields: object) -> None:
         for name, value in fields.items():
             setattr(item, name, value)
         db.commit()
+
+
+def _number(value: str) -> float | None:
+    try:
+        return float(value) if value and value != "NA" else None
+    except ValueError:
+        return None
+
+
+def _rate_label(bytes_per_second: float | None) -> str | None:
+    if not bytes_per_second:
+        return None
+    units = ("B/s", "KiB/s", "MiB/s", "GiB/s")
+    value = bytes_per_second
+    for unit in units:
+        if value < 1024 or unit == units[-1]:
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return None
 
 
 def _kick_metadata(url: str, timeout: int) -> dict | None:
@@ -207,6 +226,12 @@ def import_vod(self, vod_id: str) -> None:
     directory = VOD_ROOT / vod_id
     directory.mkdir(parents=True, exist_ok=True)
     cookie_file: Path | None = None
+    task_key = f"klipr:vod:task:{vod_id}"
+    try:
+        from app.worker.tasks import redis_client
+        redis_client().set(task_key, self.request.id, ex=86400)
+    except Exception:
+        pass
     try:
         if not title:
             _update(identifier, status=VodStatus.fetching_metadata, progress=0, error_message=None)
@@ -221,13 +246,13 @@ def import_vod(self, vod_id: str) -> None:
                 status=VodStatus.downloading, progress=1, error_message=None)
 
         template = str(directory / "source.%(ext)s")
-        format_selector = "bestvideo+bestaudio/best"
+        format_selector = "bestvideo[height<=720]+bestaudio/best[height<=720]" if quality == "fast" else "bestvideo+bestaudio/best"
         session_options, cookie_file, request_headers = _session_download_options(platform, directory)
         download_url = _kick_playback_url(source_url, request_headers) if platform == "kick" else source_url
         command = [
-            "yt-dlp", "--force-ipv4", "--no-playlist", "--newline", "--no-colors", "--no-part", "--concurrent-fragments", "8",
+            "yt-dlp", "--force-ipv4", "--no-playlist", "--newline", "--no-colors", "--no-part", "--concurrent-fragments", "12",
             "--merge-output-format", "mp4", "--format", format_selector,
-            "--progress-template", "download:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s",
+            "--progress-template", "download:%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s",
             "--output", template,
         ]
         command.extend(session_options)
@@ -235,17 +260,23 @@ def import_vod(self, vod_id: str) -> None:
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                    text=True, bufsize=1)
         assert process.stdout is not None
+        last_progress = 1.0
+        last_update = 0.0
         for line in process.stdout:
-            match = _PROGRESS.match(line.strip())
-            if not match:
+            parts = line.strip().split("|", 4)
+            if len(parts) != 5 or not parts[0].startswith("download:"):
                 continue
-            eta_text = match.group(3).strip().replace("NA", "")
-            try:
-                eta = int(float(eta_text)) if eta_text else None
-            except ValueError:
-                eta = None
-            _update(identifier, progress=min(99.0, float(match.group(1))), download_speed=match.group(2).strip() or None,
-                    eta_seconds=eta)
+            downloaded = _number(parts[0].split(":", 1)[1]) or 0
+            total = _number(parts[1]) or _number(parts[2])
+            speed = _number(parts[3])
+            eta_value = _number(parts[4])
+            if total:
+                last_progress = max(last_progress, min(98.0, downloaded / total * 98.0))
+            now = time.monotonic()
+            if now - last_update >= 1:
+                _update(identifier, progress=last_progress, download_speed=_rate_label(speed),
+                        eta_seconds=int(eta_value) if eta_value is not None else None)
+                last_update = now
         if process.wait() != 0:
             raise RuntimeError("yt-dlp could not download this VOD. Check that it is public and available.")
 
@@ -263,6 +294,8 @@ def import_vod(self, vod_id: str) -> None:
                 "-c:a", "aac", "-b:a", "320k", "-ar", "48000",
                 "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(final),
             ], check=True, capture_output=True, text=True, timeout=86400)
+        elif source.suffix.lower() == ".mp4":
+            source.replace(final)
         else:
             subprocess.run(["ffmpeg", "-y", "-i", str(source), "-map", "0", "-c", "copy", "-movflags", "+faststart", str(final)],
                            check=True, capture_output=True, text=True, timeout=3600)
@@ -285,3 +318,12 @@ def import_vod(self, vod_id: str) -> None:
     finally:
         if cookie_file:
             cookie_file.unlink(missing_ok=True)
+        try:
+            from app.worker.tasks import redis_client
+            client = redis_client()
+            current = client.get(task_key)
+            current_id = current.decode() if isinstance(current, bytes) else str(current or "")
+            if current_id == str(self.request.id):
+                client.delete(task_key)
+        except Exception:
+            pass
