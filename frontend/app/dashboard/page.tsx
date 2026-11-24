@@ -623,8 +623,8 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
     setMessage("");
     try {
       const canvas = document.createElement("canvas");
-      canvas.width = thumbFormat === "short" ? 1080 : 1280;
-      canvas.height = thumbFormat === "short" ? 1920 : 720;
+      canvas.width = thumbFormat === "short" ? 1080 : 3840;
+      canvas.height = thumbFormat === "short" ? 1920 : 2160;
       const canvasWidth = canvas.width;
       const canvasHeight = canvas.height;
       const context = canvas.getContext("2d");
@@ -1721,7 +1721,7 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
         <div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="text-xl font-black">{ar ? "صانع الثامبنيل بالذكاء الاصطناعي" : "AI Thumbnail Studio"}</h2><p className="mt-1 text-sm text-slate-600">{ar ? "حلّل البث المختار واحصل على 3 لقطات مع عناوين عربية قابلة للتنزيل." : "Analyze a saved VOD and get three downloadable, captioned moments."}</p></div><span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-black text-violet-700">OpenAI Vision + DeepSeek</span></div>
         <div className="mt-5 grid gap-3 lg:grid-cols-4">
           <select value={smartVodId} onChange={(event) => setSmartVodId(event.target.value)} className={inputClass}><option value="">{ar ? "اختر بثاً محفوظاً" : "Choose a saved VOD"}</option>{vods.filter((vod) => vod.status === "ready").map((vod) => <option key={vod.id} value={vod.id}>{vod.title || "Untitled VOD"}</option>)}</select>
-          <select value={smartPlatform} onChange={(event) => setSmartPlatform(event.target.value as SmartThumbnail["platform"])} className={inputClass}><option value="youtube">YouTube · 16:9 · 1280×720</option><option value="tiktok">TikTok · 9:16 · 1080×1920</option><option value="shorts">YouTube Shorts · 9:16</option><option value="reels">Reels · 9:16</option><option value="x">X / Twitter · 16:9 · 1920×1080</option><option value="kick">Kick · 16:9 · 1920×1080</option></select>
+          <select value={smartPlatform} onChange={(event) => setSmartPlatform(event.target.value as SmartThumbnail["platform"])} className={inputClass}><option value="youtube">YouTube · 16:9 · 4K UHD</option><option value="tiktok">TikTok · 9:16 · 1080×1920</option><option value="shorts">YouTube Shorts · 9:16</option><option value="reels">Reels · 9:16</option><option value="x">X / Twitter · 16:9 · 4K UHD</option><option value="kick">Kick · 16:9 · 4K UHD</option></select>
           <select value={smartStyle} onChange={(event) => setSmartStyle(event.target.value as SmartThumbnail["frame_style"])} className={inputClass}><option value="bold">{ar ? "إطار حماسي عالي التباين" : "Bold high-contrast frame"}</option><option value="clean">{ar ? "إطار نظيف" : "Clean platform frame"}</option><option value="none">{ar ? "بدون إطار" : "No frame"}</option></select>
           <button disabled={smartBusy || !smartVodId} onClick={async () => { setSmartBusy(true); setMessage(""); try { setSmartItems(await api.createSmartThumbnails(smartVodId, smartPlatform, smartStyle)); setMessage(ar ? "بدأ تحليل البث — ستظهر ثلاث لقطات هنا عند اكتماله." : "Analysis started — three suggestions will appear here."); } catch (error) { setMessage(error instanceof Error ? error.message : "Could not start thumbnail analysis"); } finally { setSmartBusy(false); } }} className="mt-2 inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-3 font-black text-white hover:bg-violet-700 disabled:opacity-50"><WandSparkles size={18}/>{smartBusy ? (ar ? "جارٍ البدء…" : "Starting…") : (ar ? "تحليل البث وصناعة الثامبنيل" : "Analyze & generate")}</button>
         </div>
@@ -1740,7 +1740,7 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
               >
                 <b className="block text-sm">16:9</b>
                 <span className="mt-1 block text-xs text-slate-400">
-                  {ar ? "مقطع عادي · 1280×720" : "Regular VOD · 1280×720"}
+                  {ar ? "مقطع عادي · 4K UHD" : "Regular VOD · 4K UHD"}
                 </span>
               </button>
               <button
@@ -1825,7 +1825,7 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
               {ar ? "المعاينة الحية" : "Live preview"}
             </h2>
             <span className="text-xs text-slate-400">
-              {thumbFormat === "short" ? "1080 × 1920" : "1280 × 720"}
+              {thumbFormat === "short" ? "1080 × 1920" : "3840 × 2160 · 4K UHD"}
             </span>
           </div>
           <div
@@ -1849,7 +1849,7 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
               <span
                 className={`absolute start-4 top-14 rounded-md border px-2.5 py-1 text-[10px] font-black tracking-wide text-white shadow-sm ${thumbPlatform === "twitch" ? "border-[#9146FF] bg-slate-950/90" : "border-[#53FC18] bg-slate-950/90"}`}
               >
-                1080 FULL HD
+                4K UHD
               </span>
             )}
           </div>

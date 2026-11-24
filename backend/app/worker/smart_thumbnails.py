@@ -75,7 +75,9 @@ def _crop(image: Image.Image, size: tuple[int, int]) -> Image.Image:
 
 def _render(frame: Path, output: Path, headline: str, platform: str, style: str) -> None:
     portrait = platform in {"tiktok", "shorts", "reels"}
-    size = (1080, 1920) if portrait else ((1920, 1080) if platform in {"x", "kick"} else (1280, 720))
+    # Horizontal thumbnail masters are always rendered at genuine 4K UHD;
+    # social vertical covers keep their platform-native 1080×1920 master.
+    size = (1080, 1920) if portrait else (3840, 2160)
     image = _crop(Image.open(frame).convert("RGB"), size)
     image = ImageEnhance.Contrast(image).enhance(1.18)
     image = ImageEnhance.Color(image).enhance(1.15)
