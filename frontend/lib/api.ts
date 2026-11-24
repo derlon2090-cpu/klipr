@@ -72,6 +72,8 @@ export type Branding = {
   default_intro_key: string | null;
   default_outro_key: string | null;
   ai_music_removal: boolean;
+  channel_banner_key: string | null;
+  channel_banner_url?: string | null;
 };
 export type SavedThumbnail = {
   id: string;

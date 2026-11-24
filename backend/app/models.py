@@ -63,6 +63,7 @@ class ArchiveBranding(Base):
     default_intro_key: Mapped[str | None] = mapped_column(Text)
     default_outro_key: Mapped[str | None] = mapped_column(Text)
     ai_music_removal: Mapped[bool] = mapped_column(Boolean, default=False)
+    channel_banner_key: Mapped[str | None] = mapped_column(Text)
 
 
 class SessionCredential(Base):

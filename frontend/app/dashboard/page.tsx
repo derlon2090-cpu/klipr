@@ -65,6 +65,8 @@ const emptyBranding: Branding = {
   default_intro_key: null,
   default_outro_key: null,
   ai_music_removal: false,
+  channel_banner_key: null,
+  channel_banner_url: null,
 };
 const validSections: DashboardSection[] = [
   "live",
@@ -2477,10 +2479,10 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <section className="space-y-6 rounded-3xl border border-emerald-100 bg-white p-6 shadow-sm">
           <div><div className="mb-3 flex items-center justify-between"><b>{ar ? "شعار القناة · YouTube 16:9" : "Channel logo · YouTube 16:9"}</b>{branding.overlay_logo_url && <a href={branding.overlay_logo_url} download className="text-xs font-black text-emerald-700">{ar ? "تنزيل الشعار" : "Download logo"}</a>}</div>
-            <div className="relative mx-auto grid aspect-video max-w-3xl place-items-center overflow-hidden rounded-2xl border-[10px] border-emerald-500 bg-black shadow-[0_0_40px_rgba(16,185,129,.25)]"><div className="text-center"><p className="mb-3 text-sm font-black tracking-[.25em] text-emerald-300">{branding.overlay_creator_name || (ar ? "اسم المشهور" : "CREATOR")}</p><div className="mx-auto grid size-40 place-items-center overflow-hidden rounded-3xl bg-emerald-600 shadow-2xl">{branding.overlay_logo_url ? <img src={branding.overlay_logo_url} alt="Channel logo" className="h-full w-full object-contain" /> : <span className="text-7xl font-black text-white">K</span>}</div><p className="mt-4 text-3xl font-black text-white drop-shadow-lg">{branding.overlay_creator_name || (ar ? "اسم المشهور" : "Creator name")}</p></div></div>
+            <div className="relative mx-auto grid aspect-video max-w-3xl place-items-center overflow-hidden rounded-2xl border-[10px] border-emerald-500 bg-black shadow-[0_0_40px_rgba(16,185,129,.25)]"><div className="text-center"><div className="mx-auto grid size-40 place-items-center overflow-hidden rounded-full border-4 border-emerald-300 bg-emerald-600 shadow-2xl">{branding.overlay_logo_url ? <img src={branding.overlay_logo_url} alt="Channel logo" className="h-full w-full object-contain" /> : <span className="text-7xl font-black text-white">K</span>}</div><p className="mt-4 text-3xl font-black text-white drop-shadow-lg">{branding.overlay_creator_name || (ar ? "اسم المشهور" : "Creator name")}</p></div></div>
           </div>
           <div><div className="mb-3 flex items-center justify-between"><b>{ar ? "بنر يوتيوب" : "YouTube banner"}</b><span className="text-xs text-slate-500">2560 × 1440</span></div>
-            <div className="relative mx-auto flex aspect-[16/9] max-w-3xl items-center justify-center overflow-hidden rounded-2xl border border-emerald-500 bg-[radial-gradient(circle_at_50%_20%,#14532d,#020617_65%)] px-8 shadow-xl"><div className="absolute inset-0 opacity-30 [background-image:linear-gradient(120deg,transparent_10%,#34d399_50%,transparent_90%)]"/><div className="relative text-center"><p className="text-4xl font-black tracking-tight text-white sm:text-6xl"><span className="text-emerald-300">{(branding.overlay_creator_name || "Klipr").split(" ")[0]}</span>{" "}{(branding.overlay_creator_name || (ar ? "المشهور" : "Creator")).split(" ").slice(1).join(" ")}</p><p className="mt-4 text-sm font-bold tracking-[.2em] text-slate-200">{ar ? "القناة الرسمية · مقاطع وبثوث مميزة" : "OFFICIAL CHANNEL · STREAMS & HIGHLIGHTS"}</p></div></div>
+            <div className="relative mx-auto aspect-[16/9] max-w-3xl overflow-hidden rounded-2xl border border-emerald-500 bg-slate-950 shadow-xl">{branding.channel_banner_url ? <img src={branding.channel_banner_url} alt="Saved channel banner" className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-sm font-bold text-emerald-200">{ar ? "جارٍ حفظ البنر الجاهز…" : "Saving supplied banner…"}</div>}</div>
           </div>
         </section>
         <aside className="space-y-5 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
