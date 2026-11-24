@@ -14,7 +14,7 @@ from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import Clip, SmartThumbnail, Stream, Vod
-from app.storage import download_file
+from app.storage import presigned_download_url
 from app.worker.tasks import WORK_ROOT
 
 
@@ -122,15 +122,16 @@ def generate_smart_thumbnails(self, ids: list[str]) -> None:
         stream_ids = [stream.id for stream in streams]
         highlights = db.query(Clip).filter(Clip.stream_id.in_(stream_ids)).order_by(Clip.viral_score.desc(), Clip.score.desc()).limit(3).all() if stream_ids else []
     job_dir = WORK_ROOT / "smart-thumbnails" / str(items[0].vod_id)
-    source = job_dir / "vod.mp4"
     try:
         job_dir.mkdir(parents=True, exist_ok=True)
-        download_file(vod.storage_key, source)
+        # FFmpeg seeks through the signed R2 URL with HTTP range requests, so
+        # three thumbnails do not first download a 50GB VOD to the worker.
+        source_url = presigned_download_url(vod.storage_key)
         for index, item in enumerate(items):
             _update(item.id, status="processing", progress=15, error_message=None)
             timestamp = max(1.0, min(float(duration - 1), (highlights[index].start_seconds + highlights[index].end_seconds) / 2 if index < len(highlights) else duration * (0.22 + index * 0.29)))
             frame = job_dir / f"frame-{item.id}.jpg"
-            subprocess.run(["ffmpeg", "-y", "-ss", str(timestamp), "-i", str(source), "-frames:v", "1", "-q:v", "2", str(frame)], check=True, capture_output=True, text=True, timeout=180)
+            subprocess.run(["ffmpeg", "-y", "-ss", str(timestamp), "-i", source_url, "-frames:v", "1", "-q:v", "2", str(frame)], check=True, capture_output=True, text=True, timeout=180)
             fallback_context = (highlights[index].hook_title or highlights[index].highlight_reason) if index < len(highlights) else f"لحظة بارزة من البث عند الدقيقة {int(timestamp // 60) + 1}"
             context = _vision_context(frame, fallback_context)
             _update(item.id, progress=55, timestamp_seconds=timestamp, context=context)
