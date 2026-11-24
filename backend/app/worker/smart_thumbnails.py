@@ -36,7 +36,7 @@ def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
 
 def _hook(context: str, index: int) -> str:
     settings = get_settings()
-    fallback = ["صدمة كبيرة", "موقف مجنون", "ردة فعل"][index % 3]
+    fallback = ["لحظة صادمة", "موقف غريب", "ردة فعل"][index % 3]
     if not settings.deepseek_api_key:
         return fallback
     prompt = f"اكتب عبارة عربية قصيرة جداً من كلمتين أو ثلاث فقط للثامبنيل، مثيرة لكنها صادقة، وتلخص أقوى ما حدث. لا هاشتاقات ولا علامات اقتباس ولا شرح: {context[:700]}"
@@ -45,7 +45,10 @@ def _hook(context: str, index: int) -> str:
         response.raise_for_status()
         title = response.json()["choices"][0]["message"]["content"].strip().replace("\n", " ").strip('"“”')
         words = title.split()
-        return " ".join(words[:3])[:44] or fallback
+        candidate = " ".join(words[:3])[:44]
+        # Keep the image headline trustworthy and readable. If the model
+        # produces mixed-script/noisy text, use a concise approved Arabic hook.
+        return candidate if candidate and all("\u0600" <= char <= "\u06ff" or char.isspace() for char in candidate) else fallback
     except Exception:
         return fallback
 
@@ -90,7 +93,7 @@ def _render(frame: Path, output: Path, headline: str, platform: str, style: str)
         border = max(8, round(size[0] * (.014 if style == "bold" else .008)))
         # One uninterrupted frame, drawn inside the image boundary so no
         # segment disappears when platforms crop the thumbnail preview.
-        draw.rectangle((border // 2, border // 2, size[0] - 1 - border // 2, size[1] - 1 - border // 2), outline=accent, width=border)
+        draw.rectangle((0, 0, size[0] - 1, size[1] - 1), outline=accent, width=border)
     # Use a compact, readable Arabic headline in a dedicated contrast panel.
     words = headline.split()
     lines = [" ".join(words[:max(1, len(words) // 2)]), " ".join(words[max(1, len(words) // 2):])]
@@ -99,15 +102,10 @@ def _render(frame: Path, output: Path, headline: str, platform: str, style: str)
     font = _font(font_size)
     margin = int(size[0] * .055)
     line_gap = int(font_size * .92)
-    panel_height = margin + len(lines) * line_gap + margin
-    panel_width = min(int(size[0] * .56), max(int(size[0] * .32), max((draw.textbbox((0, 0), get_display(reshape(line)), font=font)[2] for line in lines)) + margin * 2))
-    panel_left = size[0] - panel_width - margin
-    panel_top = margin
-    draw.rounded_rectangle((panel_left, panel_top, panel_left + panel_width, panel_top + panel_height), radius=max(18, margin // 2), fill=(4, 10, 12, 218), outline=accent, width=max(3, border // 3 if style != "none" else 3))
     for line_index, line in enumerate(lines):
         text = get_display(reshape(line))
         color = "#ffffff" if line_index == 0 else "#ffe600"
-        draw.text((size[0] - margin * 2, panel_top + margin // 2 + line_index * line_gap), text, anchor="ra", font=font, fill=color, stroke_width=max(3, font_size // 18), stroke_fill="#080808")
+        draw.text((size[0] - margin, margin + line_index * line_gap), text, anchor="ra", font=font, fill=color, stroke_width=max(3, font_size // 16), stroke_fill="#080808")
     output.parent.mkdir(parents=True, exist_ok=True)
     image.save(output, "JPEG", quality=95, optimize=True)
 
