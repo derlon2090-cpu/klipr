@@ -9,7 +9,7 @@ import requests
 from arabic_reshaper import reshape
 from bidi.algorithm import get_display
 from celery import shared_task
-from PIL import Image, ImageDraw, ImageEnhance, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageStat
 
 from app.config import get_settings
 from app.db import SessionLocal
@@ -65,6 +65,57 @@ def _vision_context(frame: Path, fallback: str) -> str:
         return response.json()["choices"][0]["message"]["content"].strip()[:500] or fallback
     except Exception:
         return fallback
+
+
+def _visual_score(frame: Path) -> float:
+    """Rank frames locally so we never use a cut, fade, or empty frame.
+
+    The highlights model chooses *where* to look.  This score chooses the
+    clearest, most colourful frame inside that moment, which is a much better
+    thumbnail candidate than always taking the mathematical midpoint.
+    """
+    with Image.open(frame) as source:
+        image = source.convert("RGB").resize((320, 180))
+    stat = ImageStat.Stat(image)
+    brightness = sum(stat.mean) / 3
+    contrast = sum(stat.stddev) / 3
+    # A sharp stream frame has more high-frequency detail than a transition,
+    # loading screen, or fade. FIND_EDGES keeps this dependency-free.
+    edge_strength = sum(ImageStat.Stat(image.filter(ImageFilter.FIND_EDGES)).mean) / 3
+    saturation = sum(max(pixel) - min(pixel) for pixel in image.getdata()) / (255 * image.width * image.height)
+    exposure = max(0.0, 1 - abs(brightness - 128) / 128)
+    return contrast * 1.9 + edge_strength * 1.35 + saturation * 42 + exposure * 18
+
+
+def _moment_samples(start: float, end: float, duration: float) -> list[float]:
+    """Return safe, deterministic samples that favour the peak of a moment."""
+    span = max(1.0, end - start)
+    # Avoid the starts/ends where scene cuts, overlays, and subtitles often
+    # occur. The centre is included, but it is no longer the only choice.
+    fractions = (0.28, 0.42, 0.56, 0.70)
+    return [max(1.0, min(duration - 1.0, start + span * fraction)) for fraction in fractions]
+
+
+def _fallback_moments(duration: float, count: int) -> list[tuple[float, float]]:
+    """Evenly cover a VOD only when no analysed highlight is available."""
+    window = min(24.0, max(8.0, duration / max(count * 5, 1)))
+    centres = [duration * (index + 1) / (count + 1) for index in range(count)]
+    return [(max(1.0, centre - window / 2), min(duration - 1.0, centre + window / 2)) for centre in centres]
+
+
+def _extract_best_frame(source_url: str, samples: list[float], destination: Path) -> float:
+    """Extract and rank several frames, retaining only the strongest one."""
+    ranked: list[tuple[float, float, Path]] = []
+    for number, timestamp in enumerate(samples):
+        candidate = destination.with_name(f"{destination.stem}-candidate-{number}.jpg")
+        subprocess.run(["ffmpeg", "-y", "-ss", str(timestamp), "-i", source_url, "-frames:v", "1", "-q:v", "2", str(candidate)], check=True, capture_output=True, text=True, timeout=180)
+        ranked.append((_visual_score(candidate), timestamp, candidate))
+    _, timestamp, winner = max(ranked, key=lambda item: item[0])
+    winner.replace(destination)
+    for _, _, candidate in ranked:
+        if candidate != winner:
+            candidate.unlink(missing_ok=True)
+    return timestamp
 
 
 def _crop(image: Image.Image, size: tuple[int, int]) -> Image.Image:
@@ -134,12 +185,22 @@ def generate_smart_thumbnails(self, ids: list[str]) -> None:
         # FFmpeg seeks through the signed R2 URL with HTTP range requests, so
         # three thumbnails do not first download a 50GB VOD to the worker.
         source_url = presigned_download_url(vod.storage_key)
+        # Start with analysed high-energy clips. They are already ordered by
+        # their viral and editorial scores, so suggestions represent distinct
+        # meaningful moments instead of random places in the recording.
+        moments = [(clip.start_seconds, clip.end_seconds, clip) for clip in highlights]
+        if not moments:
+            raise ValueError("No analysed VOD events are available for thumbnail selection")
+        # If the analyzer found fewer than three distinct events, make visual
+        # alternatives from its strongest event(s), never from an arbitrary
+        # timestamp elsewhere in the VOD.
+        moments = [moments[index % len(moments)] for index in range(len(items))]
         for index, item in enumerate(items):
             _update(item.id, status="processing", progress=15, error_message=None)
-            timestamp = max(1.0, min(float(duration - 1), (highlights[index].start_seconds + highlights[index].end_seconds) / 2 if index < len(highlights) else duration * (0.22 + index * 0.29)))
+            start, end, highlight = moments[index]
             frame = job_dir / f"frame-{item.id}.jpg"
-            subprocess.run(["ffmpeg", "-y", "-ss", str(timestamp), "-i", source_url, "-frames:v", "1", "-q:v", "2", str(frame)], check=True, capture_output=True, text=True, timeout=180)
-            fallback_context = (highlights[index].hook_title or highlights[index].highlight_reason) if index < len(highlights) else f"لحظة بارزة من البث عند الدقيقة {int(timestamp // 60) + 1}"
+            timestamp = _extract_best_frame(source_url, _moment_samples(start, end, float(duration)), frame)
+            fallback_context = (highlight.hook_title or highlight.highlight_reason or "حدث بارز في البث") if highlight else f"لقطة واضحة من البث عند الدقيقة {int(timestamp // 60) + 1}"
             context = _vision_context(frame, fallback_context)
             _update(item.id, progress=55, timestamp_seconds=timestamp, context=context)
             headline = _hook(context, index)

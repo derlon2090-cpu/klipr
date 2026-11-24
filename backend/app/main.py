@@ -679,38 +679,49 @@ def generate_ai_metadata(payload: AiMetadataRequest):
         if vod is None: raise HTTPException(404, "VOD not found")
         if vod.status != VodStatus.ready: raise HTTPException(409, "Select a ready VOD first")
         streams = db.query(Stream).filter(Stream.source_url == vod.source_url).all()
-        clips = db.query(Clip).filter(Clip.stream_id.in_([item.id for item in streams])).order_by(Clip.start_seconds).all() if streams else []
-        transcript = " ".join((clip.transcript_snippet or clip.transcript or "").strip() for clip in clips).strip()[:12000]
-        moments = [{"time": _chapter_time(clip.start_seconds), "title": clip.hook_title or clip.highlight_reason or "لحظة بارزة"} for clip in clips[:12]]
+        clips = db.query(Clip).filter(Clip.stream_id.in_([item.id for item in streams])).order_by(Clip.viral_score.desc(), Clip.score.desc()).all() if streams else []
+        # Metadata must describe what actually occurred in the VOD. A source
+        # title is context only; it is never sufficient evidence for a title,
+        # description, or chapter.
+        evidence = [{
+            "time": _chapter_time(clip.start_seconds),
+            "end_time": _chapter_time(clip.end_seconds),
+            "viral_score": clip.viral_score or 0,
+            "event": clip.hook_title or clip.highlight_reason or "",
+            "reason": clip.highlight_reason or "",
+            "spoken_words": (clip.transcript_snippet or clip.transcript or "").strip(),
+        } for clip in clips]
+        evidence = [event for event in evidence if event["event"] or event["spoken_words"]]
+        if not evidence:
+            raise HTTPException(409, "حلّل أحداث البث أولاً. لا يمكن إنشاء عنوان أو وصف احترافي من عنوان البث فقط.")
+        transcript = " ".join(event["spoken_words"] for event in evidence).strip()[:12000]
+        moments = [{"time": event["time"], "title": event["event"] or event["spoken_words"][:80]} for event in sorted(evidence, key=lambda event: event["time"])[:12]]
         title = (vod.title or "بث مباشر").strip()
         creator = (vod.streamer_name or "صانع المحتوى").strip()
         duration = int(vod.duration_seconds or 0)
 
+    strongest_events = [event["event"] or event["spoken_words"][:70] for event in evidence[:3]]
+    lead_event = strongest_events[0]
     base_titles = [
-        f"{title} | أقوى لحظات {creator}",
-        f"ما حدث في هذا البث لم يكن متوقعاً! 🔥",
-        f"أفضل لحظات {creator} في بث واحد",
-        f"لقطات حاسمة وردود فعل لا تُفوّت",
-        f"ملخص البث الكامل: تحديات، ضحك وأقوى اللحظات",
+        f"{lead_event} | أقوى لحظات {creator}",
+        f"{lead_event}... ردة الفعل كانت غير متوقعة! 🔥",
+        f"{strongest_events[1] if len(strongest_events) > 1 else lead_event} | من أقوى أحداث البث",
+        f"أبرز ما حدث في البث: {lead_event}",
+        f"{lead_event} و{strongest_events[1] if len(strongest_events) > 1 else 'لحظات لا تُفوّت'}",
     ]
-    chapters = moments or [
-        {"time": "00:00", "title": "المقدمة وبداية البث"},
-        {"time": _chapter_time(duration * .25), "title": "بداية الأحداث المهمة"},
-        {"time": _chapter_time(duration * .5), "title": "منتصف البث وأبرز التحديات"},
-        {"time": _chapter_time(duration * .75), "title": "اللحظات الحاسمة"},
-    ]
+    chapters = moments
     fallback = {
         "titles": [{"text": value, "score": score} for value, score in zip(base_titles, (94, 91, 89, 87, 85))],
-        "description": f"استمتعوا بملخص احترافي لبث {creator}: {title}. جمعنا أبرز الأحداث واللحظات الممتعة في فيديو واحد.\n\nاشتركوا وفعّلوا التنبيهات لمتابعة المقاطع الجديدة.",
+        "description": f"في هذا البث من {creator}: {lead_event}. كما شهدنا {strongest_events[1] if len(strongest_events) > 1 else 'لحظات بارزة أخرى'} — وهذه أبرز الأحداث مرتبة حسب قوتها.\n\nاشتركوا وفعّلوا التنبيهات لمتابعة المقاطع الجديدة.",
         "chapters": chapters,
         "tags": [creator, "بث مباشر", "قيمز", "مقاطع", "أفضل اللحظات", "Klipr"],
         "hashtags": ["#بث_مباشر", "#قيمز", "#مقاطع", "#Klipr"],
-        "source": "transcript" if transcript else "vod-metadata",
+        "source": "vod-events",
     }
     settings = get_settings()
     if not settings.deepseek_api_key:
         return fallback
-    prompt = f"""أنت محرر يوتيوب عربي محترف. أعد JSON فقط بالمفاتيح: titles (خمسة عناصر text وscore من 100)، description، chapters (time وtitle)، tags، hashtags. اجعل العناوين جذابة بلا تضليل والوصف متوافقاً مع SEO. اسم القناة: {creator}. عنوان البث: {title}. المدة: {duration} ثانية. أبرز اللحظات: {json.dumps(moments, ensure_ascii=False)}. التفريغ: {transcript or 'لا يوجد تفريغ؛ اعتمد على بيانات البث'}. صياغة مختلفة: {payload.regenerate}."""
+    prompt = f"""أنت محرر يوتيوب عربي محترف. أعد JSON فقط بالمفاتيح: titles (خمسة عناصر text وscore من 100)، description، chapters (time وtitle)، tags، hashtags. اجعل العناوين جذابة بلا تضليل والوصف متوافقاً مع SEO. قاعدة إلزامية: ابنِ كل ادعاء على أحداث البث المثبتة أدناه، ولا تستخدم عنوان البث إلا كسياق ثانوي ولا تخترع أحداثاً. اسم القناة: {creator}. عنوان البث (سياق فقط): {title}. المدة: {duration} ثانية. أدلة الأحداث مرتبة بالقوة: {json.dumps(evidence[:12], ensure_ascii=False)}. التفريغ: {transcript}. صياغة مختلفة: {payload.regenerate}."""
     try:
         request = UrlRequest(
             "https://api.deepseek.com/chat/completions",
@@ -726,7 +737,7 @@ def generate_ai_metadata(payload: AiMetadataRequest):
         for key in ("description", "chapters", "tags", "hashtags"):
             if key not in generated:
                 raise ValueError(f"AI response did not include {key}")
-        generated["source"] = "ai-transcript" if transcript else "ai-vod-metadata"
+        generated["source"] = "ai-vod-events"
         return generated
     except Exception:
         return fallback
@@ -893,6 +904,10 @@ def create_smart_thumbnails(payload: SmartThumbnailRequest):
         vod = db.get(Vod, payload.vod_id)
         if vod is None or vod.status != VodStatus.ready or not vod.storage_key:
             raise HTTPException(409, "Select a ready VOD from the vault first")
+        streams = db.query(Stream).filter(Stream.source_url == vod.source_url).all()
+        has_events = bool(streams) and db.query(Clip.id).filter(Clip.stream_id.in_([stream.id for stream in streams])).first() is not None
+        if not has_events:
+            raise HTTPException(409, "حلّل أحداث البث أولاً. صانع الثامبنيل يختار من أبرز الأحداث، وليس من لقطات عشوائية.")
         items = [SmartThumbnail(vod_id=vod.id, platform=payload.platform, frame_style=payload.frame_style) for _ in range(3)]
         db.add_all(items); db.commit()
         for item in items: db.refresh(item)
