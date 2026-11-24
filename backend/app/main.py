@@ -846,6 +846,9 @@ async def create_studio_render(
         vod = db.get(Vod, vod_id)
         if vod is None or vod.status != VodStatus.ready or not vod.storage_key:
             raise HTTPException(409, "Select a ready VOD from the vault first")
+        active = db.query(StudioRender).filter(StudioRender.vod_id == vod_id, StudioRender.status.in_(["queued", "processing"])).first()
+        if active:
+            raise HTTPException(409, "An editorial export is already running for this broadcast")
         if export_quality not in {"original", "4k"}:
             raise HTTPException(422, "export_quality must be original or 4k")
         if start_seconds is not None and start_seconds < 0: raise HTTPException(422, "start_seconds must be positive")

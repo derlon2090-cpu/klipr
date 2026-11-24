@@ -101,6 +101,13 @@ def render_studio(self, render_id: str) -> None:
         segments = [Path(p) for p in (intro, str(source), outro) if p]
         normalized: list[Path] = []
         for index, segment in enumerate(segments):
+            # The selected VOD is already H.264/AAC at its native quality.
+            # Never re-encode a multi-hour source merely to concatenate it
+            # with the short branded clips.
+            if segment == source and export_quality == "original":
+                normalized.append(source)
+                _update(rid, progress=70)
+                continue
             normalized_file = job_dir / f"normalized-{index}.mp4"
             command = ["ffmpeg", "-y", "-i", str(segment)]
             if not _has_audio(segment): command += ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]
