@@ -149,6 +149,14 @@ export type Vod = {
   created_at: string;
   updated_at: string;
 };
+export type AiMetadata = {
+  titles: { text: string; score: number }[];
+  description: string;
+  chapters: { time: string; title: string }[];
+  tags: string[];
+  hashtags: string[];
+  source: string;
+};
 export type StudioRender = {
   id: string;
   vod_id: string;
@@ -305,10 +313,12 @@ export const api = {
     }),
   streams: () => request<Stream[]>("/streams"),
   vods: () => request<Vod[]>("/vods"),
-  importVod: (url: string, quality: "fast" | "original" | "4k_upscale" = "fast") =>
+  importVod: (url: string, quality: "4k" = "4k") =>
     request<Vod>("/vods/import", { method: "POST", body: JSON.stringify({ url, quality }) }),
   vodStatus: (id: string) => request<Vod>(`/vods/status/${id}`),
   cancelVod: (id: string) => request<Vod>(`/vods/${id}/cancel`, { method: "POST" }),
+  generateAiMetadata: (vod_id: string, regenerate = false) =>
+    request<AiMetadata>("/ai-metadata/generate", { method: "POST", body: JSON.stringify({ vod_id, regenerate }) }),
   deleteVod: (id: string) => request<void>(`/vods/${id}`, { method: "DELETE" }),
   openVodInEditor: (id: string) => request<Stream>(`/vods/${id}/open-in-editor`, { method: "POST" }),
   generateVodClips: (id: string) => request<void>(`/vods/${id}/generate-clips`, { method: "POST", body: JSON.stringify({}) }),

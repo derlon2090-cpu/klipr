@@ -12,7 +12,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from html import unescape
-from urllib.request import HTTPRedirectHandler, Request as UrlRequest, build_opener
+from urllib.request import HTTPRedirectHandler, Request as UrlRequest, build_opener, urlopen
 from urllib.parse import urlparse, urlunparse
 from uuid import UUID, uuid4
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
@@ -305,7 +305,12 @@ class PasswordRequest(BaseModel): password: str
 class EmailRequest(BaseModel): email: str
 class VodImportRequest(BaseModel):
     url: str = Field(min_length=12, max_length=2000)
-    quality: str = "original"
+    quality: str = "4k"
+
+
+class AiMetadataRequest(BaseModel):
+    vod_id: UUID
+    regenerate: bool = False
 
 
 class SmartThumbnailRequest(BaseModel):
@@ -460,6 +465,10 @@ def _vod_task_key(vod_id: UUID) -> str:
     return f"klipr:vod:task:{vod_id}"
 
 
+def _vod_lock_key(vod_id: UUID) -> str:
+    return f"klipr:vod:lock:{vod_id}"
+
+
 def _find_vod_task(vod_id: UUID) -> str | None:
     """Return the queued/running Celery task id, including legacy jobs."""
     try:
@@ -488,7 +497,7 @@ def _cancel_vod_task(vod_id: UUID) -> bool:
     if task_id:
         celery_app.control.revoke(task_id, terminate=True, signal="SIGTERM")
     try:
-        redis_client().delete(_vod_task_key(vod_id))
+        redis_client().delete(_vod_task_key(vod_id), _vod_lock_key(vod_id))
     except RedisError:
         pass
     return bool(task_id)
@@ -572,9 +581,10 @@ def readiness():
 @app.post("/vods/import", status_code=202)
 def create_vod_import(payload: VodImportRequest):
     platform, normalized_url = normalize_vod_url(payload.url)
-    quality = payload.quality.strip().lower() or "original"
-    if quality not in {"fast", "original", "4k_upscale"}:
-        raise HTTPException(422, "quality must be fast, original or 4k_upscale")
+    # Imports use one deliberate mastering profile: 4K at 60fps.
+    quality = payload.quality.strip().lower() or "4k"
+    if quality != "4k":
+        raise HTTPException(422, "quality must be 4k")
     try:
         info = extract_vod_metadata(normalized_url)
     except Exception as error:
@@ -600,8 +610,7 @@ def create_vod_import(payload: VodImportRequest):
         raise HTTPException(503, "عامل الاستخراج غير متصل حالياً. لم يتم إنشاء مهمة معلّقة.")
     with SessionLocal() as db:
         existing = db.query(Vod).filter(Vod.source_url == normalized_url).first()
-        same_original = existing and existing.quality in {"best", "bestvideo+bestaudio/best"} and quality == "original"
-        if existing and existing.status == VodStatus.ready and (existing.quality == quality or same_original):
+        if existing and existing.status == VodStatus.ready and existing.quality == quality:
             return vod_data(existing)
         if existing and existing.status in {VodStatus.fetching_metadata, VodStatus.downloading, VodStatus.remuxing} and not _vod_is_stale(existing):
             return vod_data(existing)
@@ -651,6 +660,74 @@ def vod_status(job_id: UUID):
         if item is None: raise HTTPException(404, "VOD job not found")
         _expire_stale_vod(db, item)
         return vod_data(item)
+
+
+def _chapter_time(seconds: float) -> str:
+    value = max(0, int(seconds))
+    hours, remainder = divmod(value, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
+
+
+@app.post("/ai-metadata/generate")
+def generate_ai_metadata(payload: AiMetadataRequest):
+    """Generate publish-ready Arabic metadata from available clip transcripts."""
+    with SessionLocal() as db:
+        vod = db.get(Vod, payload.vod_id)
+        if vod is None: raise HTTPException(404, "VOD not found")
+        if vod.status != VodStatus.ready: raise HTTPException(409, "Select a ready VOD first")
+        streams = db.query(Stream).filter(Stream.source_url == vod.source_url).all()
+        clips = db.query(Clip).filter(Clip.stream_id.in_([item.id for item in streams])).order_by(Clip.start_seconds).all() if streams else []
+        transcript = " ".join((clip.transcript_snippet or clip.transcript or "").strip() for clip in clips).strip()[:12000]
+        moments = [{"time": _chapter_time(clip.start_seconds), "title": clip.hook_title or clip.highlight_reason or "لحظة بارزة"} for clip in clips[:12]]
+        title = (vod.title or "بث مباشر").strip()
+        creator = (vod.streamer_name or "صانع المحتوى").strip()
+        duration = int(vod.duration_seconds or 0)
+
+    base_titles = [
+        f"{title} | أقوى لحظات {creator}",
+        f"ما حدث في هذا البث لم يكن متوقعاً! 🔥",
+        f"أفضل لحظات {creator} في بث واحد",
+        f"لقطات حاسمة وردود فعل لا تُفوّت",
+        f"ملخص البث الكامل: تحديات، ضحك وأقوى اللحظات",
+    ]
+    chapters = moments or [
+        {"time": "00:00", "title": "المقدمة وبداية البث"},
+        {"time": _chapter_time(duration * .25), "title": "بداية الأحداث المهمة"},
+        {"time": _chapter_time(duration * .5), "title": "منتصف البث وأبرز التحديات"},
+        {"time": _chapter_time(duration * .75), "title": "اللحظات الحاسمة"},
+    ]
+    fallback = {
+        "titles": [{"text": value, "score": score} for value, score in zip(base_titles, (94, 91, 89, 87, 85))],
+        "description": f"استمتعوا بملخص احترافي لبث {creator}: {title}. جمعنا أبرز الأحداث واللحظات الممتعة في فيديو واحد.\n\nاشتركوا وفعّلوا التنبيهات لمتابعة المقاطع الجديدة.",
+        "chapters": chapters,
+        "tags": [creator, "بث مباشر", "قيمز", "مقاطع", "أفضل اللحظات", "Klipr"],
+        "hashtags": ["#بث_مباشر", "#قيمز", "#مقاطع", "#Klipr"],
+        "source": "transcript" if transcript else "vod-metadata",
+    }
+    settings = get_settings()
+    if not settings.deepseek_api_key:
+        return fallback
+    prompt = f"""أنت محرر يوتيوب عربي محترف. أعد JSON فقط بالمفاتيح: titles (خمسة عناصر text وscore من 100)، description، chapters (time وtitle)، tags، hashtags. اجعل العناوين جذابة بلا تضليل والوصف متوافقاً مع SEO. اسم القناة: {creator}. عنوان البث: {title}. المدة: {duration} ثانية. أبرز اللحظات: {json.dumps(moments, ensure_ascii=False)}. التفريغ: {transcript or 'لا يوجد تفريغ؛ اعتمد على بيانات البث'}. صياغة مختلفة: {payload.regenerate}."""
+    try:
+        request = UrlRequest(
+            "https://api.deepseek.com/chat/completions",
+            data=json.dumps({"model":"deepseek-chat","messages":[{"role":"user","content":prompt}],"temperature":.9 if payload.regenerate else .65,"response_format":{"type":"json_object"}}, ensure_ascii=False).encode(),
+            headers={"Authorization":f"Bearer {settings.deepseek_api_key}","Content-Type":"application/json","User-Agent":"Klipr.cloud/1.0"},
+            method="POST",
+        )
+        with urlopen(request, timeout=45) as response:
+            content = json.loads(response.read(2_000_000))["choices"][0]["message"]["content"]
+        generated = json.loads(content)
+        if not isinstance(generated.get("titles"), list) or not generated["titles"]:
+            raise ValueError("AI response did not include titles")
+        for key in ("description", "chapters", "tags", "hashtags"):
+            if key not in generated:
+                raise ValueError(f"AI response did not include {key}")
+        generated["source"] = "ai-transcript" if transcript else "ai-vod-metadata"
+        return generated
+    except Exception:
+        return fallback
 
 
 @app.post("/vods/{vod_id}/cancel")

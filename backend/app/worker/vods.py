@@ -227,11 +227,21 @@ def import_vod(self, vod_id: str) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     cookie_file: Path | None = None
     task_key = f"klipr:vod:task:{vod_id}"
+    lock_key = f"klipr:vod:lock:{vod_id}"
+    lock_acquired = False
     try:
         from app.worker.tasks import redis_client
-        redis_client().set(task_key, self.request.id, ex=86400)
+        client = redis_client()
+        # A duplicate Celery delivery must never run another encoder against
+        # the same VOD path.  Keep the lock longer than even a long 4K VOD.
+        lock_acquired = bool(client.set(lock_key, self.request.id, nx=True, ex=604800))
+        if not lock_acquired:
+            return
+        client.set(task_key, self.request.id, ex=604800)
     except Exception:
-        pass
+        # Redis health is checked before a job is enqueued.  If a transient
+        # fault happens here, retain compatibility and let this one worker run.
+        lock_acquired = False
     try:
         if not title:
             _update(identifier, status=VodStatus.fetching_metadata, progress=0, error_message=None)
@@ -246,7 +256,9 @@ def import_vod(self, vod_id: str) -> None:
                 status=VodStatus.downloading, progress=1, error_message=None)
 
         template = str(directory / "source.%(ext)s")
-        format_selector = "bestvideo[height<=720]+bestaudio/best[height<=720]" if quality == "fast" else "bestvideo+bestaudio/best"
+        # Always capture the best available source before producing the 4K
+        # 60fps master, so no lower quality import path exists.
+        format_selector = "bestvideo+bestaudio/best"
         session_options, cookie_file, request_headers = _session_download_options(platform, directory)
         download_url = _kick_playback_url(source_url, request_headers) if platform == "kick" else source_url
         command = [
@@ -286,11 +298,11 @@ def import_vod(self, vod_id: str) -> None:
         source = max(candidates, key=lambda path: path.stat().st_size)
         final = directory / "vod.mp4"
         _update(identifier, status=VodStatus.remuxing, progress=99, download_speed=None, eta_seconds=None)
-        if quality == "4k_upscale":
+        if quality == "4k":
             subprocess.run([
                 "ffmpeg", "-y", "-i", str(source), "-map", "0:v:0", "-map", "0:a?",
                 "-vf", "scale=3840:2160:force_original_aspect_ratio=decrease:flags=lanczos,pad=3840:2160:(ow-iw)/2:(oh-ih)/2,unsharp=5:5:0.5:5:5:0,fps=60",
-                "-c:v", "libx264", "-preset", "medium", "-crf", "16",
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "16",
                 "-c:a", "aac", "-b:a", "320k", "-ar", "48000",
                 "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(final),
             ], check=True, capture_output=True, text=True, timeout=86400)
@@ -325,5 +337,10 @@ def import_vod(self, vod_id: str) -> None:
             current_id = current.decode() if isinstance(current, bytes) else str(current or "")
             if current_id == str(self.request.id):
                 client.delete(task_key)
+            if lock_acquired:
+                current_lock = client.get(lock_key)
+                lock_id = current_lock.decode() if isinstance(current_lock, bytes) else str(current_lock or "")
+                if lock_id == str(self.request.id):
+                    client.delete(lock_key)
         except Exception:
             pass

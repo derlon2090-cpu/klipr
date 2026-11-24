@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import {
   api,
+  AiMetadata,
   ArchiveShort,
   Branding,
   CreatorSuggestion,
@@ -66,6 +67,9 @@ const validSections: DashboardSection[] = [
   "vods",
   "clips",
   "shorts",
+  "ai-metadata",
+  "channels",
+  "settings",
   "suggestions",
   "sessions",
   "presets",
@@ -111,7 +115,7 @@ const vodQualityText = (vod: Vod) => {
   const fps = vod.fps ? Math.round(vod.fps) : null;
   if (vod.height && vod.height >= 2160) return `4K 2160p${fps || 60}`;
   if (vod.height) return `${vod.height}p${fps || ""} Source`;
-  return vod.quality === "fast" ? "Fast 720p" : vod.quality === "4k_upscale" ? "4K 2160p60" : "Original Max";
+  return vod.quality === "4k" ? "4K 2160p60" : "Legacy source";
 };
 const bitrateText = (bitrate: number | null) => bitrate ? `${(bitrate / 1_000_000).toFixed(1)} Mbps` : "—";
 
@@ -159,10 +163,10 @@ const emptyCredentials: Credentials = {
   twitch: { platform: "twitch", has_session: false, status: "unset", updated_at: null, expires_at: null },
 };
 
-export default function Dashboard() {
+export function DashboardWorkspace({ initialSection = "live" }: { initialSection?: DashboardSection }) {
   const { language } = useLanguage();
   const ar = language === "ar";
-  const [section, setSection] = useState<DashboardSection>("live"),
+  const [section, setSection] = useState<DashboardSection>(initialSection),
     [streams, setStreams] = useState<Stream[]>([]),
     [archiveShorts, setArchiveShorts] = useState<ArchiveShort[]>([]),
     [detailed, setDetailed] = useState<Stream | null>(null),
@@ -195,7 +199,7 @@ export default function Dashboard() {
   const [sessionBusy, setSessionBusy] = useState<"kick" | "twitch" | null>(null);
   const [vods, setVods] = useState<Vod[]>([]);
   const [vodUrl, setVodUrl] = useState("");
-  const [vodQuality, setVodQuality] = useState<"fast" | "original" | "4k_upscale">("fast");
+  const vodQuality = "4k" as const;
   const [vodBusy, setVodBusy] = useState(false);
   const [studioVodId, setStudioVodId] = useState("");
   const [studioIntro, setStudioIntro] = useState<File | null>(null);
@@ -208,6 +212,9 @@ export default function Dashboard() {
   const [smartStyle, setSmartStyle] = useState<SmartThumbnail["frame_style"]>("bold");
   const [smartItems, setSmartItems] = useState<SmartThumbnail[]>([]);
   const [smartBusy, setSmartBusy] = useState(false);
+  const [metadataVodId, setMetadataVodId] = useState("");
+  const [aiMetadata, setAiMetadata] = useState<AiMetadata | null>(null);
+  const [metadataBusy, setMetadataBusy] = useState(false);
 
   const loadCredentials = () => api.credentials().then(setCredentials).catch(() => undefined);
 
@@ -268,7 +275,7 @@ export default function Dashboard() {
   useEffect(() => {
     if (section === "suggestions") loadSuggestions();
     if (section === "sessions") loadCredentials();
-    if (section === "vods") loadVods();
+    if (["vods", "clips", "shorts", "ai-metadata"].includes(section)) loadVods();
   }, [section]);
   useEffect(() => {
     if (!studioRender || !["queued", "processing"].includes(studioRender.status)) return;
@@ -352,7 +359,11 @@ export default function Dashboard() {
   );
   const changeSection = (next: DashboardSection) => {
     setSection(next);
-    window.history.replaceState(null, "", `/dashboard?section=${next}`);
+    const directPaths: Partial<Record<DashboardSection, string>> = {
+      vods: "/vods", clips: "/clips", shorts: "/shorts", "ai-metadata": "/ai-metadata",
+      channels: "/channels", settings: "/settings",
+    };
+    window.history.replaceState(null, "", directPaths[next] || `/dashboard?section=${next}`);
     setMessage("");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -427,7 +438,7 @@ export default function Dashboard() {
     try {
       await api.generateVodClips(vod.id);
       await load();
-      changeSection("clips");
+      changeSection("shorts");
       setMessage(ar ? "بدأ التحليل والتقطيع التلقائي. ستُحفظ المقاطع النهائية في الأرشيف." : "Automatic analysis and clipping started. Finished clips will appear in the archive.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not start automatic clips");
@@ -447,6 +458,21 @@ export default function Dashboard() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not cancel VOD processing");
     } finally { setVodBusy(false); }
+  };
+  const generateMetadata = async (regenerate = false) => {
+    if (!metadataVodId) return;
+    setMetadataBusy(true);
+    setMessage("");
+    try {
+      setAiMetadata(await api.generateAiMetadata(metadataVodId, regenerate));
+      setMessage(ar ? "تم توليد العناوين والوصف والفصول بنجاح." : "Titles, description and chapters generated.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not generate metadata");
+    } finally { setMetadataBusy(false); }
+  };
+  const copyText = async (value: string) => {
+    await navigator.clipboard.writeText(value);
+    setMessage(ar ? "تم النسخ." : "Copied.");
   };
   const generate = async () => {
     if (!selected) return;
@@ -2357,18 +2383,36 @@ export default function Dashboard() {
             <input value={vodUrl} onChange={(event) => setVodUrl(event.target.value)} dir="ltr" placeholder="https://www.twitch.tv/videos/...  أو  https://kick.com/user/videos/..." className={`${inputClass} mt-0 ps-11`} />
             <span className={`absolute start-3 top-3.5 text-xs font-black ${/twitch/i.test(vodUrl) ? "text-violet-600" : /kick/i.test(vodUrl) ? "text-lime-600" : "text-slate-400"}`}>{/twitch/i.test(vodUrl) ? "TW" : /kick/i.test(vodUrl) ? "K" : "URL"}</span>
           </div>
-          <select value={vodQuality} onChange={(event) => setVodQuality(event.target.value as "fast" | "original" | "4k_upscale")} className="rounded-xl border border-emerald-200 bg-white px-4 py-3 text-sm font-bold text-slate-700">
-            <option value="fast">{ar ? "سريع · 720p جاهز للتقطيع" : "Fast · 720p clip-ready"}</option>
-            <option value="original">{ar ? "أعلى جودة أصلية · حتى 4K / 1080p60" : "Original Max · up to 4K / 1080p60"}</option>
-            <option value="4k_upscale">{ar ? "إخراج 4K احترافي · 2160p60" : "4K Pro Upscale · 2160p60"}</option>
-          </select>
+          <div className="flex items-center justify-center rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-800">4K · 2160p60</div>
           <button disabled={vodBusy || !vodUrl.trim()} className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 font-black text-white transition hover:bg-emerald-700 disabled:opacity-50"><FolderDown size={18}/>{ar ? "جلب وحفظ البث" : "Fetch & save VOD"}</button>
         </div>
-        <p className="mt-3 text-xs leading-5 text-emerald-800">{vodQuality === "fast" ? (ar ? "الوضع الموصى به: 720p، تنزيل متوازٍ، وتجهيز سريع للمقاطع." : "Recommended: 720p, parallel download, and fast clip preparation.") : vodQuality === "original" ? (ar ? "يسحب bestvideo+bestaudio ويحفظ الجودة الأصلية بلا ضغط مع faststart." : "Downloads bestvideo+bestaudio and preserves original quality losslessly with faststart.") : (ar ? "يرقّي المصدر إلى 3840×2160 و60fps بتحجيم Lanczos وCRF 16 وصوت AAC 320kbps." : "Upscales to 3840×2160 at 60fps using Lanczos, CRF 16 and AAC 320kbps.")}</p>
+        <p className="mt-3 text-xs leading-5 text-emerald-800">{ar ? "يسحب أفضل مصدر متاح بالتنزيل المتوازي، ثم يخرج نسخة موحّدة 3840×2160 / 60fps بجودة احترافية. لا توجد أي خيارات جودة أقل." : "Fetches the best available source in parallel, then produces one professional 3840×2160 / 60fps master. No lower-quality options are available."}</p>
       </form>
       {vods.some((vod) => !["ready", "failed"].includes(vod.status)) && <div className="mb-7 space-y-3">{vods.filter((vod) => !["ready", "failed"].includes(vod.status)).map((vod) => <article key={vod.id} className="overflow-hidden rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm"><div className="flex items-center justify-between gap-3"><div className="min-w-0"><p className="truncate font-black">{vod.title || (ar ? "جارٍ استخراج بيانات البث…" : "Fetching VOD metadata…")}</p><p className="mt-1 text-xs font-bold text-emerald-700">{vod.status === "fetching_metadata" ? (ar ? "استخراج البيانات" : "Fetching metadata") : vod.status === "remuxing" ? (ar ? "تجهيز MP4 سريع التقديم" : "Preparing seekable MP4") : (ar ? "تحميل البث" : "Downloading VOD")}</p></div><span className="text-sm font-black text-emerald-700">{Math.round(vod.progress)}%</span></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-emerald-500 transition-all" style={{width: `${Math.max(3, vod.progress)}%`}} /></div><div className="mt-3 flex items-center justify-between gap-4 text-xs text-slate-500"><div className="flex gap-4"><span>{vod.download_speed || "—"}</span><span>{vod.eta_seconds ? `${vod.eta_seconds}s ETA` : ""}</span></div><button type="button" onClick={() => cancelVod(vod.id)} disabled={vodBusy} className="rounded-lg border border-rose-200 px-3 py-2 font-black text-rose-600 hover:bg-rose-50 disabled:opacity-50">{ar ? "إلغاء المعالجة فوراً" : "Cancel now"}</button></div></article>)}</div>}
       <div className="mb-3 flex items-center justify-between"><h2 className="text-lg font-black">{ar ? "البثوث الجاهزة" : "Ready broadcasts"}</h2><span className="text-xs font-bold text-slate-400">{vods.filter((vod) => vod.status === "ready").length}</span></div>
       {vods.length === 0 ? <Empty text={ar ? "لم تُحفظ أي بثوث بعد. ألصق رابط VOD للبدء." : "No saved broadcasts yet. Paste a VOD URL to begin."} /> : <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">{vods.map((vod) => <article key={vod.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="relative aspect-video bg-slate-100">{vod.thumbnail_url ? <img src={vod.thumbnail_url.startsWith("/") ? `${process.env.NEXT_PUBLIC_API_URL || "/api"}${vod.thumbnail_url}` : vod.thumbnail_url} alt="" className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-slate-300"><Film size={36}/></div>}<span className={`absolute end-3 top-3 rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${platformClass(vod.platform)}`}>{vod.platform}</span><span className="absolute start-3 top-3 rounded-full bg-slate-950/85 px-2.5 py-1 text-[10px] font-black text-white backdrop-blur">{vodQualityText(vod)}</span></div><div className="p-4"><h3 className="truncate font-black">{vod.title || (ar ? "بث غير مسمّى" : "Untitled broadcast")}</h3><p className="mt-1 truncate text-xs text-slate-500">{vod.streamer_name || "—"}</p><div className="mt-3 flex flex-wrap gap-3 text-xs font-bold text-slate-500"><span>{vodDuration(vod.duration_seconds)}</span><span>{fileSize(vod.file_size)}</span><span>{bitrateText(vod.bitrate)}</span></div>{vod.status === "failed" ? <p className="mt-3 text-xs font-bold text-rose-600">{vod.error || (ar ? "فشل الاستيراد" : "Import failed")}</p> : vod.status === "ready" ? <div className="mt-4 grid grid-cols-2 gap-2"><button onClick={() => generateVodClips(vod)} disabled={vodBusy} className="col-span-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:opacity-50">{ar ? "توليد المقاطع تلقائياً" : "Generate clips automatically"}</button><a href={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${vod.download_url || ""}`} download className="rounded-lg border border-slate-200 px-3 py-2 text-center text-xs font-black text-slate-700">{ar ? "تنزيل مباشر" : "Direct download"}</a><button onClick={() => removeVod(vod.id)} className="rounded-lg px-3 py-2 text-xs font-black text-rose-600 hover:bg-rose-50">{ar ? "حذف" : "Delete"}</button></div> : <p className="mt-3 text-xs font-bold text-slate-400">{ar ? "قيد المعالجة…" : "Processing…"}</p>}</div></article>)}</div>}
+    </>
+  );
+
+  const aiMetadataView = (
+    <>
+      <SectionTitle icon={MessageSquareText} eyebrow="AI METADATA" title={ar ? "صناعة العنوان والوصف بالذكاء الاصطناعي" : "AI Titles & Description"} description={ar ? "اختر بثاً جاهزاً لتوليد عناوين عالية الجذب ووصف SEO وفصول وهاشتاقات قابلة للنسخ." : "Generate high-CTR titles, an SEO description, chapters, tags and hashtags from a ready VOD."} />
+      <section className="rounded-3xl border border-slate-800 bg-slate-950 p-6 text-white shadow-xl">
+        <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
+          <select value={metadataVodId} onChange={(event) => { setMetadataVodId(event.target.value); setAiMetadata(null); }} className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm font-bold outline-none focus:border-emerald-500">
+            <option value="">{ar ? "اختر بثاً جاهزاً من المكتبة" : "Choose a ready VOD"}</option>
+            {vods.filter((vod) => vod.status === "ready").map((vod) => <option key={vod.id} value={vod.id}>{vod.title || (ar ? "بث غير مسمى" : "Untitled VOD")}</option>)}
+          </select>
+          <button onClick={() => generateMetadata(Boolean(aiMetadata))} disabled={!metadataVodId || metadataBusy} className="rounded-xl bg-emerald-500 px-5 py-3 text-sm font-black text-slate-950 disabled:opacity-50">{metadataBusy ? (ar ? "جارٍ التحليل…" : "Analyzing…") : aiMetadata ? (ar ? "توليد صياغة مختلفة" : "Generate another version") : (ar ? "تحليل البث وتوليد المحتوى" : "Analyze & generate")}</button>
+        </div>
+        <p className="mt-3 text-xs text-slate-400">{ar ? "يستخدم تفريغ المقاطع وأبرز اللحظات عند توفرها، ثم يصيغ المحتوى بالعربية." : "Uses clip transcripts and detected highlights when available."}</p>
+      </section>
+      {aiMetadata && <div className="mt-6 grid gap-5 xl:grid-cols-2">
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-center justify-between"><h2 className="font-black">{ar ? "5 عناوين عالية الجذب" : "5 high-CTR titles"}</h2><button onClick={() => copyText(aiMetadata.titles.map((item) => item.text).join("\n"))} className="text-xs font-black text-emerald-700">{ar ? "نسخ الكل" : "Copy all"}</button></div><div className="mt-4 space-y-3">{aiMetadata.titles.map((item, index) => <button key={`${item.text}-${index}`} onClick={() => copyText(item.text)} className="flex w-full items-start justify-between gap-3 rounded-xl bg-slate-50 p-3 text-start"><span className="text-sm font-bold">{item.text}</span><span className="shrink-0 rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-black text-emerald-700">{item.score}%</span></button>)}</div></section>
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-center justify-between"><h2 className="font-black">{ar ? "وصف SEO احترافي" : "SEO description"}</h2><button onClick={() => copyText(aiMetadata.description)} className="text-xs font-black text-emerald-700">{ar ? "نسخ" : "Copy"}</button></div><p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-600">{aiMetadata.description}</p></section>
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-center justify-between"><h2 className="font-black">{ar ? "فصول البث" : "Chapters"}</h2><button onClick={() => copyText(aiMetadata.chapters.map((item) => `${item.time} ${item.title}`).join("\n"))} className="text-xs font-black text-emerald-700">{ar ? "نسخ" : "Copy"}</button></div><div className="mt-4 space-y-2">{aiMetadata.chapters.map((item, index) => <div key={`${item.time}-${index}`} className="flex gap-3 rounded-lg bg-slate-50 px-3 py-2 text-sm"><span className="font-black text-emerald-700">{item.time}</span><span>{item.title}</span></div>)}</div></section>
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-center justify-between"><h2 className="font-black">{ar ? "الكلمات والهاشتاقات" : "Tags & hashtags"}</h2><button onClick={() => copyText([...aiMetadata.tags, ...aiMetadata.hashtags].join(" "))} className="text-xs font-black text-emerald-700">{ar ? "نسخ الكل" : "Copy all"}</button></div><div className="mt-4 flex flex-wrap gap-2">{[...aiMetadata.tags, ...aiMetadata.hashtags].map((item, index) => <span key={`${item}-${index}`} className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800">{item}</span>)}</div></section>
+      </div>}
     </>
   );
 
@@ -2449,13 +2493,32 @@ export default function Dashboard() {
       </div>
     </>
   );
+  const settingsView = (
+    <>
+      <SectionTitle icon={KeyRound} eyebrow={ar ? "الهوية والإعدادات" : "SETTINGS & BRANDING"} title={ar ? "الإعدادات والهوية" : "Settings & Branding"} description={ar ? "اعتمد هوية القناة وقوالب البداية والنهاية، ثم أدر جلسات المنصات بأمان." : "Set channel identity, intro/outro templates, and platform sessions in one place."} />
+      <div className="mb-6 grid gap-3 sm:grid-cols-3">
+        <button onClick={() => changeSection("intro-outro")} className="rounded-2xl border border-slate-200 bg-white p-4 text-start shadow-sm transition hover:border-emerald-300"><b className="block text-sm">{ar ? "المقدمة والنهاية" : "Intro & outro"}</b><span className="mt-1 block text-xs text-slate-500">{ar ? "تُدمج تلقائياً مع المقاطع العرضية" : "Applied to horizontal exports"}</span></button>
+        <button onClick={() => changeSection("sessions")} className="rounded-2xl border border-slate-200 bg-white p-4 text-start shadow-sm transition hover:border-emerald-300"><b className="block text-sm">{ar ? "جلسات المنصات" : "Platform sessions"}</b><span className="mt-1 block text-xs text-slate-500">{ar ? "Kick وTwitch بأمان" : "Secure Kick and Twitch access"}</span></button>
+        <button onClick={() => changeSection("thumbnails")} className="rounded-2xl border border-slate-200 bg-white p-4 text-start shadow-sm transition hover:border-emerald-300"><b className="block text-sm">{ar ? "الأصول والصور" : "Assets & thumbnails"}</b><span className="mt-1 block text-xs text-slate-500">{ar ? "صور جاهزة للنشر" : "Publishing-ready images"}</span></button>
+      </div>
+      {presetsView}
+    </>
+  );
   const content =
     section === "live"
       ? liveView
       : section === "vods"
         ? vodsView
       : section === "clips"
-        ? archiveView
+        ? studioView
+        : section === "shorts"
+          ? shortsView
+          : section === "ai-metadata"
+            ? aiMetadataView
+            : section === "channels"
+              ? suggestionsView
+              : section === "settings"
+                ? settingsView
         : section === "presets"
           ? presetsView
         : section === "thumbnails"
@@ -2464,9 +2527,7 @@ export default function Dashboard() {
           ? brandingView
         : section === "studio"
           ? studioView
-        : section === "shorts"
-          ? shortsView
-          : section === "sessions" ? sessionView : suggestionsView;
+        : section === "sessions" ? sessionView : suggestionsView;
   return (
     <Shell
       activeCount={active.length}
@@ -2524,6 +2585,10 @@ export default function Dashboard() {
       )}
     </Shell>
   );
+}
+
+export default function Dashboard() {
+  return <DashboardWorkspace />;
 }
 
 function ClapperboardIcon(props: React.ComponentProps<typeof Film>) {

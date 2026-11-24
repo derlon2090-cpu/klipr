@@ -32,6 +32,9 @@ export type DashboardSection =
   | "studio"
   | "live"
   | "shorts"
+  | "ai-metadata"
+  | "channels"
+  | "settings"
   | "suggestions"
   | "presets"
   | "sessions";
@@ -149,49 +152,49 @@ export function Shell({
     icon: typeof Radio;
     ar: string;
     en: string;
-    group: "library" | "studio" | "settings";
+    group: "create" | "manage";
   }[] = [
-    {
-      id: "clips",
-      icon: Archive,
-      ar: "المقاطع النهائية",
-      en: "Rendered Clips",
-      group: "library",
-    },
     {
       id: "vods",
       icon: FolderDown,
-      ar: "مكتبة البثوث المحفوظة",
-      en: "VOD Vault",
-      group: "library",
+      ar: "سحب ومكتبة البثوث",
+      en: "Import & VOD Library",
+      group: "create",
     },
     {
-      id: "thumbnails",
-      icon: ImageIcon,
-      ar: "صانع الثامبنيل",
-      en: "Thumbnail Studio",
-      group: "studio",
-    },
-    {
-      id: "intro-outro",
-      icon: Sparkles,
-      ar: "صانع المقدمة والنهاية",
-      en: "Intro & Outro",
-      group: "studio",
-    },
-    {
-      id: "studio",
+      id: "clips",
       icon: Clapperboard,
-      ar: "الاستديو",
-      en: "Production Studio",
-      group: "studio",
+      ar: "استوديو القص والمونتاج",
+      en: "Clip & Edit Studio",
+      group: "create",
     },
     {
-      id: "sessions",
+      id: "shorts",
+      icon: Sparkles,
+      ar: "صناعة الشورتات",
+      en: "Shorts Studio",
+      group: "create",
+    },
+    {
+      id: "ai-metadata",
+      icon: MessageSquareText,
+      ar: "صناعة العنوان والوصف (AI)",
+      en: "AI Titles & Metadata",
+      group: "create",
+    },
+    {
+      id: "channels",
+      icon: Radio,
+      ar: "إدارة القنوات",
+      en: "Channel Management",
+      group: "manage",
+    },
+    {
+      id: "settings",
       icon: KeyRound,
-      ar: "الجلسة",
-      en: "Session Vault",
-      group: "settings",
+      ar: "الإعدادات والهوية",
+      en: "Settings & Branding",
+      group: "manage",
     },
   ];
   const choose = (id: DashboardSection) => {
@@ -204,24 +207,23 @@ export function Shell({
     window.location.assign("/");
   };
   const groups = [
-    { id: "studio", ar: "الإنتاج والاستديو", en: "PRODUCTION & STUDIO" },
-    { id: "library", ar: "الأرشيف والمكتبة", en: "LIBRARY & ARCHIVE" },
-    { id: "settings", ar: "الإعدادات والربط", en: "SETTINGS & CONNECTIONS" },
+    { id: "create", ar: "الإنتاج والمحتوى", en: "CREATE & PUBLISH" },
+    { id: "manage", ar: "الإدارة والإعدادات", en: "MANAGE & SETTINGS" },
   ] as const;
   const nav = (
     <nav className="space-y-2 px-3 py-2">
       {groups.map((group) => (
         <section key={group.id} className="pt-1">
-          <p className="px-3 pb-1 pt-2 text-[11px] font-semibold tracking-wider text-slate-400">
+          <p className="px-3 pb-1 pt-2 text-[11px] font-semibold tracking-wider text-slate-500">
             {ar ? group.ar : group.en}
           </p>
           <div className="space-y-1">
             {items.filter((item) => item.group === group.id).map(({ id, icon: Icon, ar: arLabel, en }) => (
-              <button key={id} onClick={() => choose(id)} className={`flex w-full items-center gap-2.5 rounded-xl border px-3 py-2.5 text-start text-sm font-medium transition ${activeSection === id ? "border-emerald-200/80 bg-emerald-50 text-emerald-700 shadow-sm" : "border-transparent text-slate-600 hover:border-slate-200 hover:bg-slate-50"}`}>
-                <span className={`grid size-8 shrink-0 place-items-center rounded-lg ${activeSection === id ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-500"}`}><Icon size={17} /></span>
+              <button key={id} onClick={() => choose(id)} className={`flex w-full items-center gap-2.5 rounded-xl border px-3 py-2.5 text-start text-sm font-medium transition ${activeSection === id ? "border-emerald-400/30 bg-emerald-500/15 text-emerald-300 shadow-sm" : "border-transparent text-slate-300 hover:border-slate-700 hover:bg-slate-800"}`}>
+                <span className={`grid size-8 shrink-0 place-items-center rounded-lg ${activeSection === id ? "bg-emerald-500 text-slate-950" : "bg-slate-800 text-slate-400"}`}><Icon size={17} /></span>
                 <span className="min-w-0 flex-1 truncate">{ar ? arLabel : en}</span>
                 {id === "live" && activeCount > 0 && <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-black text-white">{activeCount}</span>}
-                {id === "sessions" && <span className={`size-2.5 shrink-0 rounded-full ${sessionStatus === "active" ? "bg-emerald-500" : sessionStatus === "expired" ? "bg-amber-500" : "bg-slate-300"}`} aria-label={sessionStatus} />}
+                {id === "settings" && <span className={`size-2.5 shrink-0 rounded-full ${sessionStatus === "active" ? "bg-emerald-500" : sessionStatus === "expired" ? "bg-amber-500" : "bg-slate-600"}`} aria-label={sessionStatus} />}
               </button>
             ))}
           </div>
@@ -504,13 +506,13 @@ export function Shell({
           </div>
         </div>
       </header>
-      <aside className="fixed inset-y-0 start-0 z-40 hidden w-72 border-e border-slate-200 bg-white lg:flex lg:flex-col">
-        <div className="flex h-16 items-center border-b border-slate-100 px-4">
+      <aside className="fixed inset-y-0 start-0 z-40 hidden w-72 border-e border-slate-800 bg-slate-950 text-white lg:flex lg:flex-col">
+        <div className="flex h-16 items-center border-b border-slate-800 px-4 [&_span]:text-white">
           <KliprLogo href="/dashboard" className="[&_svg]:size-9" />
         </div>
         <div className="flex-1 overflow-hidden">{nav}</div>
         <div className="p-4 pt-2">
-          <p className="rounded-full bg-slate-50 px-3 py-2 text-center text-[11px] font-semibold text-slate-400">Klipr.cloud • Studio v1.0</p>
+          <p className="rounded-full bg-slate-900 px-3 py-2 text-center text-[11px] font-semibold text-slate-500">Klipr.cloud • Studio v1.0</p>
         </div>
       </aside>
       {open && (
@@ -519,14 +521,14 @@ export function Shell({
           onClick={() => setOpen(false)}
         >
           <aside
-            className="h-full w-[86%] max-w-80 bg-white shadow-2xl"
+            className="h-full w-[86%] max-w-80 bg-slate-950 text-white shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex h-16 items-center justify-between border-b border-slate-100 px-4">
+            <div className="flex h-16 items-center justify-between border-b border-slate-800 px-4 [&_span]:text-white">
               <KliprLogo href="/dashboard" className="[&_svg]:size-9" />
               <button
                 onClick={() => setOpen(false)}
-                className="rounded-lg p-2 hover:bg-slate-100"
+                className="rounded-lg p-2 hover:bg-slate-800"
               >
                 <X />
               </button>
