@@ -226,6 +226,30 @@ def _merge_default_identity(video: Path, directory: Path) -> Path:
     return merged
 
 
+def _remove_music_with_ai(video: Path, directory: Path, vod_id: UUID) -> Path:
+    """Keep the separated vocal stem; never fail an import if AI separation fails."""
+    with SessionLocal() as db:
+        branding = db.get(ArchiveBranding, 1)
+        enabled = bool(branding and branding.ai_music_removal)
+    if not enabled:
+        return video
+    _update(vod_id, status=VodStatus.remuxing, progress=99, download_speed="AI music removal")
+    audio, clean = directory / "source-audio.wav", directory / "music-cleaned.mp4"
+    try:
+        subprocess.run(["ffmpeg", "-y", "-i", str(video), "-vn", "-ac", "2", "-ar", "44100", str(audio)], check=True, capture_output=True, text=True, timeout=7200)
+        separated = directory / "separated"
+        subprocess.run(["python", "-m", "demucs", "--two-stems", "vocals", "-n", "htdemucs", "--segment", "7", "--out", str(separated), str(audio)], check=True, capture_output=True, text=True, timeout=86400)
+        vocals = separated / "htdemucs" / audio.stem / "vocals.wav"
+        if not vocals.is_file():
+            raise RuntimeError("Demucs did not produce a vocal stem")
+        subprocess.run(["ffmpeg", "-y", "-i", str(video), "-i", str(vocals), "-map", "0:v:0", "-map", "1:a:0", "-af", "highpass=f=80,lowpass=f=8000,afftdn,loudnorm", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(clean)], check=True, capture_output=True, text=True, timeout=7200)
+    except Exception:
+        # Preserve the video and apply a lightweight non-destructive fallback.
+        subprocess.run(["ffmpeg", "-y", "-i", str(video), "-af", "highpass=f=80,lowpass=f=8000,afftdn", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(clean)], check=True, capture_output=True, text=True, timeout=7200)
+    video.unlink(missing_ok=True)
+    return clean
+
+
 @shared_task(bind=True, autoretry_for=(OSError,), retry_backoff=True, retry_kwargs={"max_retries": 2})
 def import_vod(self, vod_id: str) -> None:
     """Fetch metadata, download fragments concurrently, then make a seekable MP4 without re-encoding."""
@@ -331,6 +355,7 @@ def import_vod(self, vod_id: str) -> None:
             subprocess.run(["ffmpeg", "-y", "-i", str(source), "-map", "0", "-c", "copy", "-movflags", "+faststart", str(final)],
                            check=True, capture_output=True, text=True, timeout=3600)
         final = _merge_default_identity(final, directory)
+        final = _remove_music_with_ai(final, directory, identifier)
         # Prefer platform artwork, but never make the VOD card depend on it.
         thumbnail_path = thumbnail_path or _extract_best_frame(final, directory)
         storage_key = f"vods/{vod_id}/vod.mp4"

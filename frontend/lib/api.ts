@@ -68,6 +68,10 @@ export type Branding = {
   overlay_logo_url?: string | null;
   overlay_creator_name: string | null;
   overlay_position: "top-right" | "top-left" | "bottom-center";
+  auto_merge_branding: boolean;
+  default_intro_key: string | null;
+  default_outro_key: string | null;
+  ai_music_removal: boolean;
 };
 export type SavedThumbnail = {
   id: string;

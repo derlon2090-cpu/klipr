@@ -61,6 +61,10 @@ const emptyBranding: Branding = {
   overlay_logo_url: null,
   overlay_creator_name: "",
   overlay_position: "top-right",
+  auto_merge_branding: true,
+  default_intro_key: null,
+  default_outro_key: null,
+  ai_music_removal: false,
 };
 const validSections: DashboardSection[] = [
   "live",
@@ -2492,7 +2496,7 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
   const settingsView = (
     <>
       <SectionTitle icon={KeyRound} eyebrow={ar ? "الهوية والإعدادات" : "SETTINGS & BRANDING"} title={ar ? "الإعدادات والهوية" : "Settings & Branding"} description={ar ? "اعتمد هوية القناة وقوالب البداية والنهاية، ثم أدر جلسات المنصات بأمان." : "Set channel identity, intro/outro templates, and platform sessions in one place."} />
-      <div className="mb-6 grid gap-3 sm:grid-cols-3"><div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4"><b className="block text-sm text-emerald-900">{ar ? "دمج تلقائي للهوية" : "Automatic branding"}</b><span className="mt-1 block text-xs text-emerald-700">{ar ? "تُطبّق المقدمة والنهاية والهوية الافتراضية تلقائياً." : "Your defaults are applied automatically."}</span></div><div className="rounded-2xl border border-slate-200 bg-white p-4"><b className="block text-sm">Cloudflare R2</b><span className="mt-1 block text-xs text-emerald-700">{ar ? "متصل ومهيأ" : "Connected and configured"}</span></div><button onClick={() => changeSection("sessions")} className="rounded-2xl border border-slate-200 bg-white p-4 text-start shadow-sm transition hover:border-emerald-300"><b className="block text-sm">{ar ? "جلسات المنصات" : "Platform sessions"}</b><span className="mt-1 block text-xs text-slate-500">Kick و Twitch</span></button></div>
+      <div className="mb-6 grid gap-3 sm:grid-cols-3"><button onClick={() => setBranding({ ...branding, auto_merge_branding: !branding.auto_merge_branding })} className={`rounded-2xl border p-4 text-start ${branding.auto_merge_branding ? "border-emerald-300 bg-emerald-50" : "border-slate-200 bg-white"}`}><b className="block text-sm text-emerald-900">{ar ? "مقدمة 5 ث + خاتمة 8 ث" : "5s intro + 8s outro"}</b><span className="mt-1 block text-xs text-emerald-700">{branding.auto_merge_branding ? (ar ? "مفعّل تلقائياً عند السحب" : "Enabled for every import") : (ar ? "غير مفعّل" : "Disabled")}</span></button><button onClick={() => setBranding({ ...branding, ai_music_removal: !branding.ai_music_removal })} className={`rounded-2xl border p-4 text-start ${branding.ai_music_removal ? "border-emerald-300 bg-emerald-50" : "border-slate-200 bg-white"}`}><b className="block text-sm text-emerald-900">{ar ? "إزالة الموسيقى بالذكاء" : "AI music removal"}</b><span className="mt-1 block text-xs text-emerald-700">{branding.ai_music_removal ? (ar ? "Demucs + فلترة صوت" : "Demucs + vocal cleanup") : (ar ? "اضغط للتفعيل" : "Click to enable")}</span></button><button onClick={() => changeSection("sessions")} className="rounded-2xl border border-slate-200 bg-white p-4 text-start shadow-sm transition hover:border-emerald-300"><b className="block text-sm">{ar ? "جلسات المنصات" : "Platform sessions"}</b><span className="mt-1 block text-xs text-slate-500">Kick و Twitch</span></button></div>
       {presetsView}
     </>
   );
