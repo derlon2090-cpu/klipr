@@ -257,6 +257,8 @@ class BrandingRequest(BaseModel):
     default_right_vod_id: UUID | None = None
     overlay_creator_name: str | None = Field(default=None, max_length=120)
     overlay_position: str = "top-right"
+    auto_merge_branding: bool = True
+    ai_music_removal: bool = False
 
     @field_validator("overlay_position")
     @classmethod
@@ -931,6 +933,10 @@ def _ensure_preset_schema(db):
         db.execute(text("ALTER TABLE archive_branding ADD COLUMN IF NOT EXISTS overlay_logo_key TEXT"))
         db.execute(text("ALTER TABLE archive_branding ADD COLUMN IF NOT EXISTS overlay_creator_name VARCHAR(120)"))
         db.execute(text("ALTER TABLE archive_branding ADD COLUMN IF NOT EXISTS overlay_position VARCHAR(24) NOT NULL DEFAULT 'top-right'"))
+        db.execute(text("ALTER TABLE archive_branding ADD COLUMN IF NOT EXISTS auto_merge_branding BOOLEAN NOT NULL DEFAULT TRUE"))
+        db.execute(text("ALTER TABLE archive_branding ADD COLUMN IF NOT EXISTS default_intro_key TEXT"))
+        db.execute(text("ALTER TABLE archive_branding ADD COLUMN IF NOT EXISTS default_outro_key TEXT"))
+        db.execute(text("ALTER TABLE archive_branding ADD COLUMN IF NOT EXISTS ai_music_removal BOOLEAN NOT NULL DEFAULT FALSE"))
         db.execute(text("ALTER TABLE streams ADD COLUMN IF NOT EXISTS overlay_logo_key TEXT"))
         db.execute(text("ALTER TABLE streams ADD COLUMN IF NOT EXISTS overlay_creator_name VARCHAR(120)"))
         db.execute(text("ALTER TABLE streams ADD COLUMN IF NOT EXISTS overlay_position VARCHAR(24) NOT NULL DEFAULT 'top-right'"))
@@ -997,13 +1003,14 @@ def delete_creator_suggestion(suggestion_id: UUID):
         if item is None: raise HTTPException(404, "Suggestion not found")
         db.delete(item); db.commit()
 def _branding(db):
+    _ensure_preset_schema(db)
     item = db.get(ArchiveBranding, 1)
     if not item: item = ArchiveBranding(id=1); db.add(item); db.commit(); db.refresh(item)
     return item
 @app.get("/branding")
 def get_branding():
     with SessionLocal() as db:
-        item = _branding(db); return {"enable_end_screen":item.enable_end_screen,"remove_music":item.remove_music,"auto_trim_ads":item.auto_trim_ads,"use_default_thumbnail":item.use_default_thumbnail,"outro_duration_seconds":item.outro_duration_seconds,"archive_channel_name":item.archive_channel_name,"archive_tagline":item.archive_tagline,"archive_logo_key":item.archive_logo_key,"archive_logo_url":presigned_download_url(item.archive_logo_key) if item.archive_logo_key else None,"default_thumbnail_key":item.default_thumbnail_key,"default_thumbnail_url":presigned_download_url(item.default_thumbnail_key) if item.default_thumbnail_key else None,"default_short_thumbnail_key":item.default_short_thumbnail_key,"default_short_thumbnail_url":presigned_download_url(item.default_short_thumbnail_key) if item.default_short_thumbnail_key else None,"default_left_vod_id":item.default_left_vod_id,"default_right_vod_id":item.default_right_vod_id,"overlay_logo_key":item.overlay_logo_key,"overlay_logo_url":presigned_download_url(item.overlay_logo_key) if item.overlay_logo_key else None,"overlay_creator_name":item.overlay_creator_name,"overlay_position":item.overlay_position}
+        item = _branding(db); return {"enable_end_screen":item.enable_end_screen,"remove_music":item.remove_music,"auto_trim_ads":item.auto_trim_ads,"use_default_thumbnail":item.use_default_thumbnail,"outro_duration_seconds":item.outro_duration_seconds,"archive_channel_name":item.archive_channel_name,"archive_tagline":item.archive_tagline,"archive_logo_key":item.archive_logo_key,"archive_logo_url":presigned_download_url(item.archive_logo_key) if item.archive_logo_key else None,"default_thumbnail_key":item.default_thumbnail_key,"default_thumbnail_url":presigned_download_url(item.default_thumbnail_key) if item.default_thumbnail_key else None,"default_short_thumbnail_key":item.default_short_thumbnail_key,"default_short_thumbnail_url":presigned_download_url(item.default_short_thumbnail_key) if item.default_short_thumbnail_key else None,"default_left_vod_id":item.default_left_vod_id,"default_right_vod_id":item.default_right_vod_id,"overlay_logo_key":item.overlay_logo_key,"overlay_logo_url":presigned_download_url(item.overlay_logo_key) if item.overlay_logo_key else None,"overlay_creator_name":item.overlay_creator_name,"overlay_position":item.overlay_position,"auto_merge_branding":item.auto_merge_branding,"default_intro_key":item.default_intro_key,"default_outro_key":item.default_outro_key,"ai_music_removal":item.ai_music_removal}
 @app.put("/branding")
 def put_branding(payload: BrandingRequest):
     if not 10 <= payload.outro_duration_seconds <= 20: raise HTTPException(422,"outro_duration_seconds must be between 10 and 20")

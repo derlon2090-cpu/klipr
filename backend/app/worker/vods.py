@@ -15,8 +15,8 @@ from celery import shared_task
 
 from app.core.crypto import decrypt_secret
 from app.db import SessionLocal
-from app.models import SessionCredential, Vod, VodStatus
-from app.storage import upload_file
+from app.models import ArchiveBranding, SessionCredential, Vod, VodStatus
+from app.storage import download_file, upload_file
 
 VOD_ROOT = Path("/var/lib/klipr/vods")
 _KICK_VIDEO = re.compile(r"^https?://(?:www\.)?kick\.com/[^/]+/videos/([0-9a-f-]{36})(?:[/?#]|$)", re.I)
@@ -212,6 +212,20 @@ def _probe_video(path: Path) -> dict[str, int | float | None]:
     return {"width": stream.get("width"), "height": stream.get("height"), "fps": fps, "bitrate": bitrate}
 
 
+def _merge_default_identity(video: Path, directory: Path) -> Path:
+    """Prepend the 5s intro and append the 8s outro configured globally."""
+    with SessionLocal() as db:
+        branding = db.get(ArchiveBranding, 1)
+        keys = (branding.default_intro_key, branding.default_outro_key) if branding and branding.auto_merge_branding else (None, None)
+    if not all(keys):
+        return video
+    intro, outro, merged = directory / "default-intro.mp4", directory / "default-outro.mp4", directory / "branded-vod.mp4"
+    download_file(str(keys[0]), intro); download_file(str(keys[1]), outro)
+    subprocess.run(["ffmpeg", "-y", "-i", str(intro), "-i", str(video), "-i", str(outro), "-filter_complex", "[0:v][0:a][1:v][1:a][2:v][2:a]concat=n=3:v=1:a=1[v][a]", "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-preset", "veryfast", "-crf", "17", "-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart", str(merged)], check=True, capture_output=True, text=True, timeout=86400)
+    video.unlink(missing_ok=True)
+    return merged
+
+
 @shared_task(bind=True, autoretry_for=(OSError,), retry_backoff=True, retry_kwargs={"max_retries": 2})
 def import_vod(self, vod_id: str) -> None:
     """Fetch metadata, download fragments concurrently, then make a seekable MP4 without re-encoding."""
@@ -316,6 +330,7 @@ def import_vod(self, vod_id: str) -> None:
         else:
             subprocess.run(["ffmpeg", "-y", "-i", str(source), "-map", "0", "-c", "copy", "-movflags", "+faststart", str(final)],
                            check=True, capture_output=True, text=True, timeout=3600)
+        final = _merge_default_identity(final, directory)
         # Prefer platform artwork, but never make the VOD card depend on it.
         thumbnail_path = thumbnail_path or _extract_best_frame(final, directory)
         storage_key = f"vods/{vod_id}/vod.mp4"

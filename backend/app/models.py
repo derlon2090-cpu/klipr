@@ -59,6 +59,10 @@ class ArchiveBranding(Base):
     overlay_logo_key: Mapped[str | None] = mapped_column(Text)
     overlay_creator_name: Mapped[str | None] = mapped_column(String(120))
     overlay_position: Mapped[str] = mapped_column(String(24), default="top-right")
+    auto_merge_branding: Mapped[bool] = mapped_column(Boolean, default=True)
+    default_intro_key: Mapped[str | None] = mapped_column(Text)
+    default_outro_key: Mapped[str | None] = mapped_column(Text)
+    ai_music_removal: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class SessionCredential(Base):
