@@ -919,6 +919,26 @@ def download_smart_thumbnail(thumbnail_id: UUID):
     if not output.is_file(): raise HTTPException(404, "Thumbnail file is unavailable")
     return FileResponse(output, media_type="image/jpeg", filename=f"klipr-thumbnail-{thumbnail_id}.jpg")
 
+
+@app.post("/smart-thumbnails/{thumbnail_id}/approve")
+def approve_smart_thumbnail(thumbnail_id: UUID):
+    """Save an approved AI candidate into the persistent thumbnail library."""
+    with SessionLocal() as db:
+        candidate = db.get(SmartThumbnail, thumbnail_id)
+        if candidate is None or candidate.status != "ready" or not candidate.output_path:
+            raise HTTPException(409, "Thumbnail is not ready for approval")
+        output = Path(candidate.output_path)
+        if not output.is_file():
+            raise HTTPException(404, "Thumbnail output is unavailable")
+        key = f"branding/thumbnails/ai-{thumbnail_id}.jpg"
+        upload_file(output, key, "image/jpeg")
+        branding = _branding(db)
+        branding.default_thumbnail_key = key
+        branding.use_default_thumbnail = True
+        saved = SavedThumbnail(kind="vod", storage_key=key)
+        db.add(saved); db.commit(); db.refresh(saved)
+        return {"id": str(saved.id), "kind": "vod", "key": key, "url": presigned_download_url(key), "selected": True}
+
 def _ensure_preset_schema(db):
     # Lazy, idempotent upgrade keeps existing deployments compatible without
     # making serverless startup depend on a database connection.

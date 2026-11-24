@@ -340,6 +340,7 @@ export const api = {
   createSmartThumbnails: (vod_id: string, platform: SmartThumbnail["platform"], frame_style: SmartThumbnail["frame_style"]) =>
     request<SmartThumbnail[]>("/smart-thumbnails", { method: "POST", body: JSON.stringify({ vod_id, platform, frame_style }) }),
   smartThumbnail: (id: string) => request<SmartThumbnail>(`/smart-thumbnails/${id}`),
+  approveSmartThumbnail: (id: string) => request<SavedThumbnail>(`/smart-thumbnails/${id}/approve`, { method: "POST" }),
   archiveShorts: () => request<ArchiveShort[]>("/archive/shorts"),
   stream: (id: string) => request<Stream>(`/streams/${id}`),
   preview: (stream_url: string) =>
