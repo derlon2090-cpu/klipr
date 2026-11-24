@@ -103,9 +103,10 @@ def _render(frame: Path, output: Path, headline: str, platform: str, style: str)
     margin = int(size[0] * .055)
     line_gap = int(font_size * .92)
     for line_index, line in enumerate(lines):
-        text = get_display(reshape(line))
         color = "#ffffff" if line_index == 0 else "#ffe600"
-        draw.text((size[0] - margin, margin + line_index * line_gap), text, anchor="ra", font=font, fill=color, stroke_width=max(3, font_size // 16), stroke_fill="#080808")
+        # Pillow was built with libraqm in the worker, so pass logical Arabic
+        # text directly and let its RTL shaping engine join glyphs correctly.
+        draw.text((size[0] - margin, margin + line_index * line_gap), line, anchor="ra", direction="rtl", language="ar", font=font, fill=color, stroke_width=max(3, font_size // 16), stroke_fill="#080808")
     output.parent.mkdir(parents=True, exist_ok=True)
     image.save(output, "JPEG", quality=95, optimize=True)
 
