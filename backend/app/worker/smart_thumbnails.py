@@ -84,8 +84,11 @@ def _render(frame: Path, output: Path, headline: str, platform: str, style: str)
     draw = ImageDraw.Draw(image)
     accent = "#53fc18" if platform == "kick" else "#ff1744" if platform in {"tiktok", "shorts", "reels"} else "#ff003c"
     if style != "none":
-        width = 18 if style == "bold" else 8
-        draw.rectangle((width // 2, width // 2, size[0] - width // 2, size[1] - width // 2), outline=accent, width=width)
+        width = 22 if style == "bold" else 10
+        # The frame deliberately touches every outer edge, unlike an inset
+        # overlay, so the exported JPEG keeps a crisp platform-ready border.
+        for offset in range(width):
+            draw.rectangle((offset, offset, size[0] - 1 - offset, size[1] - 1 - offset), outline=accent)
     # A compact, high-contrast two-line treatment inspired by modern gaming
     # thumbnails: short Arabic hook, white lead line and yellow payoff line.
     words = headline.split()
