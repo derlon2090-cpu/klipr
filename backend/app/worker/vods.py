@@ -229,6 +229,11 @@ def _merge_default_identity(video: Path, directory: Path) -> Path:
         keys = (branding.default_intro_key, branding.default_outro_key) if branding and branding.auto_merge_branding else (None, None)
     if not all(keys):
         return video
+    # Concatenation writes a second full-length file. Never fill the worker
+    # volume and leave an import stuck at 99%; publish the native master when
+    # there is not enough temporary capacity for a safe editorial render.
+    if shutil.disk_usage(directory).free < video.stat().st_size + 2 * 1024**3:
+        return video
     intro, outro, merged = directory / "default-intro.mp4", directory / "default-outro.mp4", directory / "branded-vod.mp4"
     download_file(str(keys[0]), intro); download_file(str(keys[1]), outro)
     width, height, fps = _media_shape(video)
@@ -263,6 +268,8 @@ def _remove_music_with_ai(video: Path, directory: Path, vod_id: UUID) -> Path:
         duration_seconds = float(duration_probe.stdout.strip() or 0)
     except ValueError:
         duration_seconds = 0
+    if shutil.disk_usage(directory).free < video.stat().st_size + 2 * 1024**3:
+        return video
     if duration_seconds > 15 * 60:
         # Demucs is excellent for short clips, but on a CPU-only worker a
         # five-hour source blocks delivery for hours. Keep video untouched and
