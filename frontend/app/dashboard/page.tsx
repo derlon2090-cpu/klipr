@@ -3272,6 +3272,51 @@ export function DashboardWorkspace({
                         ? "اعتماد وحفظ مع المقدمة والخاتمة"
                         : "Save with intro & outro"}
                     </button>
+                    {studioRender?.vod_id === vod.id && (
+                      <div className="col-span-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                        <div className="flex items-center justify-between text-xs font-black text-emerald-800">
+                          <span>
+                            {studioRender.status === "ready"
+                              ? ar
+                                ? "النسخة جاهزة"
+                                : "Editorial export ready"
+                              : studioRender.status === "failed"
+                                ? ar
+                                  ? "فشل التصدير"
+                                  : "Export failed"
+                                : ar
+                                  ? "جارٍ تجهيز النسخة بالمقدمة والخاتمة"
+                                  : "Rendering intro, selection and outro"}
+                          </span>
+                          <span>{Math.round(studioRender.progress)}%</span>
+                        </div>
+                        <div className="mt-2 h-2 overflow-hidden rounded-full bg-white">
+                          <div
+                            className={`h-full rounded-full transition-all ${studioRender.status === "failed" ? "bg-rose-500" : "bg-emerald-500"}`}
+                            style={{
+                              width: `${Math.max(3, studioRender.progress)}%`,
+                            }}
+                          />
+                        </div>
+                        {studioRender.error && (
+                          <p className="mt-2 text-[11px] font-bold text-rose-600">
+                            {studioRender.error}
+                          </p>
+                        )}
+                        {studioRender.download_url && (
+                          <a
+                            href={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${studioRender.download_url}`}
+                            download
+                            className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs font-black text-white"
+                          >
+                            <Download size={14} />
+                            {ar
+                              ? "تنزيل النسخة النهائية"
+                              : "Download final export"}
+                          </a>
+                        )}
+                      </div>
+                    )}
                     <button
                       onClick={() => generateVodClips(vod)}
                       disabled={vodBusy}

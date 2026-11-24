@@ -71,8 +71,19 @@ def render_studio(self, render_id: str) -> None:
         if start_seconds is not None: trim_command += ["-ss", str(start_seconds)]
         trim_command += ["-i", source_url]
         if end_seconds is not None: trim_command += ["-t", str(end_seconds - (start_seconds or 0))]
-        trim_command += ["-map", "0:v:0", "-map", "0:a?", "-c", "copy", str(source)]
-        subprocess.run(trim_command, check=True, capture_output=True, text=True, timeout=7200)
+        trim_command += ["-map", "0:v:0", "-map", "0:a?", "-c", "copy", "-progress", "pipe:1", "-nostats", str(source)]
+        expected_seconds = max(1.0, (end_seconds or vod.duration_seconds or 1) - (start_seconds or 0))
+        trim_process = subprocess.Popen(trim_command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
+        assert trim_process.stdout is not None
+        for line in trim_process.stdout:
+            if line.startswith("out_time_ms="):
+                try:
+                    elapsed = int(line.split("=", 1)[1]) / 1_000_000
+                    _update(rid, progress=min(55, 5 + elapsed / expected_seconds * 50))
+                except ValueError:
+                    pass
+        if trim_process.wait() != 0:
+            raise RuntimeError("Unable to extract the selected time range")
         _update(rid, progress=65)
         # With no intro/outro, preserve the original VOD without re-encoding.
         if not intro and not outro and export_quality == "original":
