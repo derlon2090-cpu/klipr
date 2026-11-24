@@ -220,6 +220,11 @@ def import_vod(self, vod_id: str) -> None:
         vod = db.get(Vod, identifier)
         if vod is None:
             return
+        # A revoked/cancelled job can still be delivered once by Celery's
+        # retry scheduler.  Its database status is the source of truth: never
+        # resurrect a VOD that was cancelled or has already completed.
+        if vod.status not in {VodStatus.fetching_metadata, VodStatus.downloading, VodStatus.remuxing}:
+            return
         source_url, quality, platform = vod.source_url, vod.quality, vod.platform
         title, uploader = vod.title, vod.streamer_name
         duration, thumbnail_url = vod.duration_seconds, vod.thumbnail_url
