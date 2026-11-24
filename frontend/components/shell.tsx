@@ -32,7 +32,7 @@ export type DashboardSection =
   | "studio"
   | "live"
   | "shorts"
-  | "ai-metadata"
+  | "metadata"
   | "channels"
   | "settings"
   | "suggestions"
@@ -162,13 +162,6 @@ export function Shell({
       group: "create",
     },
     {
-      id: "clips",
-      icon: Clapperboard,
-      ar: "استوديو القص والمونتاج",
-      en: "Clip & Edit Studio",
-      group: "create",
-    },
-    {
       id: "shorts",
       icon: Sparkles,
       ar: "صناعة الشورتات",
@@ -176,17 +169,19 @@ export function Shell({
       group: "create",
     },
     {
-      id: "ai-metadata",
+      id: "metadata",
       icon: MessageSquareText,
       ar: "صناعة العنوان والوصف (AI)",
       en: "AI Titles & Metadata",
       group: "create",
     },
+    { id: "thumbnails", icon: ImageIcon, ar: "صانع الثامبنيل", en: "Thumbnail Studio", group: "create" },
+    { id: "suggestions", icon: Sparkles, ar: "الاقتراحات", en: "Suggestions", group: "create" },
     {
-      id: "channels",
-      icon: Radio,
-      ar: "إدارة القنوات",
-      en: "Channel Management",
+      id: "sessions",
+      icon: KeyRound,
+      ar: "جلسة الكوكيز",
+      en: "Cookie Sessions",
       group: "manage",
     },
     {

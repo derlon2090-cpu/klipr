@@ -65,10 +65,8 @@ const emptyBranding: Branding = {
 const validSections: DashboardSection[] = [
   "live",
   "vods",
-  "clips",
   "shorts",
-  "ai-metadata",
-  "channels",
+  "metadata",
   "settings",
   "suggestions",
   "sessions",
@@ -275,7 +273,7 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
   useEffect(() => {
     if (section === "suggestions") loadSuggestions();
     if (section === "sessions") loadCredentials();
-    if (["vods", "clips", "shorts", "ai-metadata"].includes(section)) loadVods();
+    if (["vods", "shorts", "metadata", "thumbnails", "suggestions"].includes(section)) loadVods();
   }, [section]);
   useEffect(() => {
     if (!studioRender || !["queued", "processing"].includes(studioRender.status)) return;
@@ -360,8 +358,9 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
   const changeSection = (next: DashboardSection) => {
     setSection(next);
     const directPaths: Partial<Record<DashboardSection, string>> = {
-      vods: "/vods", clips: "/clips", shorts: "/shorts", "ai-metadata": "/ai-metadata",
-      channels: "/channels", settings: "/settings",
+      vods: "/dashboard?section=vods", shorts: "/dashboard?section=shorts", metadata: "/dashboard?section=metadata",
+      thumbnails: "/dashboard?section=thumbnails", suggestions: "/dashboard?section=suggestions",
+      sessions: "/dashboard?section=sessions", settings: "/dashboard?section=settings",
     };
     window.history.replaceState(null, "", directPaths[next] || `/dashboard?section=${next}`);
     setMessage("");
@@ -2390,7 +2389,7 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
       </form>
       {vods.some((vod) => !["ready", "failed"].includes(vod.status)) && <div className="mb-7 space-y-3">{vods.filter((vod) => !["ready", "failed"].includes(vod.status)).map((vod) => <article key={vod.id} className="overflow-hidden rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm"><div className="flex items-center justify-between gap-3"><div className="min-w-0"><p className="truncate font-black">{vod.title || (ar ? "جارٍ استخراج بيانات البث…" : "Fetching VOD metadata…")}</p><p className="mt-1 text-xs font-bold text-emerald-700">{vod.status === "fetching_metadata" ? (ar ? "استخراج البيانات" : "Fetching metadata") : vod.status === "remuxing" ? (ar ? "تجهيز MP4 سريع التقديم" : "Preparing seekable MP4") : (ar ? "تحميل البث" : "Downloading VOD")}</p></div><span className="text-sm font-black text-emerald-700">{Math.round(vod.progress)}%</span></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-emerald-500 transition-all" style={{width: `${Math.max(3, vod.progress)}%`}} /></div><div className="mt-3 flex items-center justify-between gap-4 text-xs text-slate-500"><div className="flex gap-4"><span>{vod.download_speed || "—"}</span><span>{vod.eta_seconds ? `${vod.eta_seconds}s ETA` : ""}</span></div><button type="button" onClick={() => cancelVod(vod.id)} disabled={vodBusy} className="rounded-lg border border-rose-200 px-3 py-2 font-black text-rose-600 hover:bg-rose-50 disabled:opacity-50">{ar ? "إلغاء المعالجة فوراً" : "Cancel now"}</button></div></article>)}</div>}
       <div className="mb-3 flex items-center justify-between"><h2 className="text-lg font-black">{ar ? "البثوث الجاهزة" : "Ready broadcasts"}</h2><span className="text-xs font-bold text-slate-400">{vods.filter((vod) => vod.status === "ready").length}</span></div>
-      {vods.length === 0 ? <Empty text={ar ? "لم تُحفظ أي بثوث بعد. ألصق رابط VOD للبدء." : "No saved broadcasts yet. Paste a VOD URL to begin."} /> : <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">{vods.map((vod) => <article key={vod.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="relative aspect-video bg-slate-100">{vod.thumbnail_url ? <img src={vod.thumbnail_url.startsWith("/") ? `${process.env.NEXT_PUBLIC_API_URL || "/api"}${vod.thumbnail_url}` : vod.thumbnail_url} alt="" className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-slate-300"><Film size={36}/></div>}<span className={`absolute end-3 top-3 rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${platformClass(vod.platform)}`}>{vod.platform}</span><span className="absolute start-3 top-3 rounded-full bg-slate-950/85 px-2.5 py-1 text-[10px] font-black text-white backdrop-blur">{vodQualityText(vod)}</span></div><div className="p-4"><h3 className="truncate font-black">{vod.title || (ar ? "بث غير مسمّى" : "Untitled broadcast")}</h3><p className="mt-1 truncate text-xs text-slate-500">{vod.streamer_name || "—"}</p><div className="mt-3 flex flex-wrap gap-3 text-xs font-bold text-slate-500"><span>{vodDuration(vod.duration_seconds)}</span><span>{fileSize(vod.file_size)}</span><span>{bitrateText(vod.bitrate)}</span></div>{vod.status === "failed" ? <p className="mt-3 text-xs font-bold text-rose-600">{vod.error || (ar ? "فشل الاستيراد" : "Import failed")}</p> : vod.status === "ready" ? <div className="mt-4 grid grid-cols-2 gap-2"><button onClick={() => generateVodClips(vod)} disabled={vodBusy} className="col-span-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:opacity-50">{ar ? "توليد المقاطع تلقائياً" : "Generate clips automatically"}</button><a href={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${vod.download_url || ""}`} download className="rounded-lg border border-slate-200 px-3 py-2 text-center text-xs font-black text-slate-700">{ar ? "تنزيل مباشر" : "Direct download"}</a><button onClick={() => removeVod(vod.id)} className="rounded-lg px-3 py-2 text-xs font-black text-rose-600 hover:bg-rose-50">{ar ? "حذف" : "Delete"}</button></div> : <p className="mt-3 text-xs font-bold text-slate-400">{ar ? "قيد المعالجة…" : "Processing…"}</p>}</div></article>)}</div>}
+      {vods.length === 0 ? <Empty text={ar ? "لم تُحفظ أي بثوث بعد. ألصق رابط VOD للبدء." : "No saved broadcasts yet. Paste a VOD URL to begin."} /> : <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">{vods.map((vod) => <article key={vod.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="relative aspect-video bg-slate-100">{vod.thumbnail_url ? <img src={vod.thumbnail_url.startsWith("/") ? `${process.env.NEXT_PUBLIC_API_URL || "/api"}${vod.thumbnail_url}` : vod.thumbnail_url} alt="" className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-slate-300"><Film size={36}/></div>}<span className={`absolute end-3 top-3 rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${platformClass(vod.platform)}`}>{vod.platform}</span><span className="absolute start-3 top-3 rounded-full bg-slate-950/85 px-2.5 py-1 text-[10px] font-black text-white backdrop-blur">{vodQualityText(vod)}</span></div><div className="p-4"><h3 className="truncate font-black">{vod.title || (ar ? "بث غير مسمّى" : "Untitled broadcast")}</h3><p className="mt-1 truncate text-xs text-slate-500">{vod.streamer_name || "—"}</p><div className="mt-3 flex flex-wrap gap-3 text-xs font-bold text-slate-500"><span>{vodDuration(vod.duration_seconds)}</span><span>{fileSize(vod.file_size)}</span><span>{bitrateText(vod.bitrate)}</span></div>{vod.status === "failed" ? <p className="mt-3 text-xs font-bold text-rose-600">{vod.error || (ar ? "فشل الاستيراد" : "Import failed")}</p> : vod.status === "ready" ? <div className="mt-4 grid grid-cols-2 gap-2"><button onClick={() => generateVodClips(vod)} disabled={vodBusy} className="col-span-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:opacity-50">{ar ? "إرسال لصناعة الشورتات" : "Send to Shorts"}</button><button onClick={() => { setMetadataVodId(vod.id); setAiMetadata(null); changeSection("metadata"); }} className="rounded-lg border border-emerald-200 px-3 py-2 text-xs font-black text-emerald-700">{ar ? "عنوان ووصف" : "Title & description"}</button><a href={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${vod.download_url || ""}`} download className="rounded-lg border border-slate-200 px-3 py-2 text-center text-xs font-black text-slate-700">{ar ? "تنزيل" : "Download"}</a><button onClick={() => removeVod(vod.id)} className="col-span-2 rounded-lg px-3 py-2 text-xs font-black text-rose-600 hover:bg-rose-50">{ar ? "حذف" : "Delete"}</button></div> : <p className="mt-3 text-xs font-bold text-slate-400">{ar ? "قيد المعالجة…" : "Processing…"}</p>}</div></article>)}</div>}
     </>
   );
 
@@ -2496,11 +2495,7 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
   const settingsView = (
     <>
       <SectionTitle icon={KeyRound} eyebrow={ar ? "الهوية والإعدادات" : "SETTINGS & BRANDING"} title={ar ? "الإعدادات والهوية" : "Settings & Branding"} description={ar ? "اعتمد هوية القناة وقوالب البداية والنهاية، ثم أدر جلسات المنصات بأمان." : "Set channel identity, intro/outro templates, and platform sessions in one place."} />
-      <div className="mb-6 grid gap-3 sm:grid-cols-3">
-        <button onClick={() => changeSection("intro-outro")} className="rounded-2xl border border-slate-200 bg-white p-4 text-start shadow-sm transition hover:border-emerald-300"><b className="block text-sm">{ar ? "المقدمة والنهاية" : "Intro & outro"}</b><span className="mt-1 block text-xs text-slate-500">{ar ? "تُدمج تلقائياً مع المقاطع العرضية" : "Applied to horizontal exports"}</span></button>
-        <button onClick={() => changeSection("sessions")} className="rounded-2xl border border-slate-200 bg-white p-4 text-start shadow-sm transition hover:border-emerald-300"><b className="block text-sm">{ar ? "جلسات المنصات" : "Platform sessions"}</b><span className="mt-1 block text-xs text-slate-500">{ar ? "Kick وTwitch بأمان" : "Secure Kick and Twitch access"}</span></button>
-        <button onClick={() => changeSection("thumbnails")} className="rounded-2xl border border-slate-200 bg-white p-4 text-start shadow-sm transition hover:border-emerald-300"><b className="block text-sm">{ar ? "الأصول والصور" : "Assets & thumbnails"}</b><span className="mt-1 block text-xs text-slate-500">{ar ? "صور جاهزة للنشر" : "Publishing-ready images"}</span></button>
-      </div>
+      <div className="mb-6 grid gap-3 sm:grid-cols-3"><div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4"><b className="block text-sm text-emerald-900">{ar ? "دمج تلقائي للهوية" : "Automatic branding"}</b><span className="mt-1 block text-xs text-emerald-700">{ar ? "تُطبّق المقدمة والنهاية والهوية الافتراضية تلقائياً." : "Your defaults are applied automatically."}</span></div><div className="rounded-2xl border border-slate-200 bg-white p-4"><b className="block text-sm">Cloudflare R2</b><span className="mt-1 block text-xs text-emerald-700">{ar ? "متصل ومهيأ" : "Connected and configured"}</span></div><button onClick={() => changeSection("sessions")} className="rounded-2xl border border-slate-200 bg-white p-4 text-start shadow-sm transition hover:border-emerald-300"><b className="block text-sm">{ar ? "جلسات المنصات" : "Platform sessions"}</b><span className="mt-1 block text-xs text-slate-500">Kick و Twitch</span></button></div>
       {presetsView}
     </>
   );
@@ -2509,15 +2504,11 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
       ? liveView
       : section === "vods"
         ? vodsView
-      : section === "clips"
-        ? studioView
-        : section === "shorts"
+      : section === "shorts"
           ? shortsView
-          : section === "ai-metadata"
+          : section === "metadata"
             ? aiMetadataView
-            : section === "channels"
-              ? suggestionsView
-              : section === "settings"
+            : section === "settings"
                 ? settingsView
         : section === "presets"
           ? presetsView
