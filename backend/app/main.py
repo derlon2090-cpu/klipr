@@ -854,6 +854,9 @@ async def create_studio_render(
         if start_seconds is not None and start_seconds < 0: raise HTTPException(422, "start_seconds must be positive")
         if end_seconds is not None and (start_seconds is None or end_seconds <= start_seconds): raise HTTPException(422, "end_seconds must be after start_seconds")
         if end_seconds is not None and vod.duration_seconds and end_seconds > vod.duration_seconds: raise HTTPException(422, "end_seconds exceeds the VOD duration")
+        completed = db.query(StudioRender).filter(StudioRender.vod_id == vod_id, StudioRender.status == "ready", StudioRender.start_seconds == start_seconds, StudioRender.end_seconds == end_seconds).order_by(StudioRender.created_at.desc()).first()
+        if completed:
+            return studio_render_data(completed)
         render = StudioRender(vod_id=vod_id, status="queued", progress=0, export_quality=export_quality, start_seconds=start_seconds, end_seconds=end_seconds)
         db.add(render); db.commit(); db.refresh(render)
         render_id = render.id
