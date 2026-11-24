@@ -13,7 +13,7 @@ from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
 from app.config import get_settings
 from app.db import SessionLocal
-from app.models import SmartThumbnail, Vod
+from app.models import Clip, SmartThumbnail, Stream, Vod
 from app.storage import download_file
 from app.worker.tasks import WORK_ROOT
 
@@ -34,15 +34,16 @@ def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
 
 def _hook(context: str, index: int) -> str:
     settings = get_settings()
-    fallback = ["لحظة قلبت البث", "مستحيل اللي صار", "ردة فعل نارية"][index % 3]
+    fallback = ["صدمة كبيرة", "موقف مجنون", "ردة فعل"][index % 3]
     if not settings.deepseek_api_key:
         return fallback
-    prompt = f"اكتب عنواناً عربياً جذاباً من 3 إلى 5 كلمات فقط يصف هذا الحدث فعلاً، بلا هاشتاقات أو علامات اقتباس: {context[:700]}"
+    prompt = f"اكتب عبارة عربية قصيرة جداً من كلمتين أو ثلاث فقط للثامبنيل، مثيرة لكنها صادقة، وتلخص أقوى ما حدث. لا هاشتاقات ولا علامات اقتباس ولا شرح: {context[:700]}"
     try:
         response = requests.post("https://api.deepseek.com/chat/completions", headers={"Authorization": f"Bearer {settings.deepseek_api_key}"}, json={"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.75, "max_tokens": 32}, timeout=25)
         response.raise_for_status()
         title = response.json()["choices"][0]["message"]["content"].strip().replace("\n", " ").strip('"“”')
-        return title[:80] or fallback
+        words = title.split()
+        return " ".join(words[:3])[:44] or fallback
     except Exception:
         return fallback
 
@@ -83,13 +84,19 @@ def _render(frame: Path, output: Path, headline: str, platform: str, style: str)
     if style != "none":
         width = 18 if style == "bold" else 8
         draw.rectangle((width // 2, width // 2, size[0] - width // 2, size[1] - width // 2), outline=accent, width=width)
-    text = get_display(reshape(headline))
-    font = _font(82 if portrait else 58)
-    box = draw.multiline_textbbox((0, 0), text, font=font, stroke_width=3)
-    x = (size[0] - (box[2] - box[0])) // 2
-    y = int(size[1] * (0.67 if portrait else 0.72))
-    draw.rounded_rectangle((max(24, x - 34), y - 24, min(size[0] - 24, x + box[2] + 34), y + box[3] + 28), radius=24, fill="#050505d9")
-    draw.multiline_text((x, y), text, font=font, fill="white", stroke_width=4, stroke_fill="black", align="center")
+    # A compact, high-contrast two-line treatment inspired by modern gaming
+    # thumbnails: short Arabic hook, white lead line and yellow payoff line.
+    words = headline.split()
+    lines = [" ".join(words[:max(1, len(words) // 2)]), " ".join(words[max(1, len(words) // 2):])]
+    lines = [line for line in lines if line] or [headline]
+    font_size = 110 if portrait else 94
+    font = _font(font_size)
+    x = int(size[0] * .06)
+    y = int(size[1] * (.10 if portrait else .12))
+    for line_index, line in enumerate(lines):
+        text = get_display(reshape(line))
+        color = "#ffffff" if line_index == 0 else "#ffe600"
+        draw.text((x, y + line_index * int(font_size * .86)), text, font=font, fill=color, stroke_width=8, stroke_fill="#080808")
     output.parent.mkdir(parents=True, exist_ok=True)
     image.save(output, "JPEG", quality=95, optimize=True)
 
@@ -105,6 +112,9 @@ def generate_smart_thumbnails(self, ids: list[str]) -> None:
             for item in items: _update(item.id, status="failed", error_message="The selected VOD is unavailable.")
             return
         duration = max(1, vod.duration_seconds or 1)
+        streams = db.query(Stream).filter(Stream.source_url == vod.source_url).all()
+        stream_ids = [stream.id for stream in streams]
+        highlights = db.query(Clip).filter(Clip.stream_id.in_(stream_ids)).order_by(Clip.viral_score.desc(), Clip.score.desc()).limit(3).all() if stream_ids else []
     job_dir = WORK_ROOT / "smart-thumbnails" / str(items[0].vod_id)
     source = job_dir / "vod.mp4"
     try:
@@ -112,10 +122,11 @@ def generate_smart_thumbnails(self, ids: list[str]) -> None:
         download_file(vod.storage_key, source)
         for index, item in enumerate(items):
             _update(item.id, status="processing", progress=15, error_message=None)
-            timestamp = max(1.0, min(float(duration - 1), duration * (0.22 + index * 0.29)))
+            timestamp = max(1.0, min(float(duration - 1), (highlights[index].start_seconds + highlights[index].end_seconds) / 2 if index < len(highlights) else duration * (0.22 + index * 0.29)))
             frame = job_dir / f"frame-{item.id}.jpg"
             subprocess.run(["ffmpeg", "-y", "-ss", str(timestamp), "-i", str(source), "-frames:v", "1", "-q:v", "2", str(frame)], check=True, capture_output=True, text=True, timeout=180)
-            context = _vision_context(frame, f"لحظة بارزة من البث عند الدقيقة {int(timestamp // 60) + 1}")
+            fallback_context = (highlights[index].hook_title or highlights[index].highlight_reason) if index < len(highlights) else f"لحظة بارزة من البث عند الدقيقة {int(timestamp // 60) + 1}"
+            context = _vision_context(frame, fallback_context)
             _update(item.id, progress=55, timestamp_seconds=timestamp, context=context)
             headline = _hook(context, index)
             output = job_dir / f"thumbnail-{item.id}.jpg"
