@@ -93,7 +93,8 @@ def _render(frame: Path, output: Path, headline: str, platform: str, style: str)
         border = max(8, round(size[0] * (.014 if style == "bold" else .008)))
         # One uninterrupted frame, drawn inside the image boundary so no
         # segment disappears when platforms crop the thumbnail preview.
-        draw.rectangle((0, 0, size[0] - 1, size[1] - 1), outline=accent, width=border)
+        radius = max(18, round(size[0] * .035))
+        draw.rounded_rectangle((border // 2, border // 2, size[0] - 1 - border // 2, size[1] - 1 - border // 2), radius=radius, outline=accent, width=border)
     # Use a compact, readable Arabic headline in a dedicated contrast panel.
     words = headline.split()
     lines = [" ".join(words[:max(1, len(words) // 2)]), " ".join(words[max(1, len(words) // 2):])]
