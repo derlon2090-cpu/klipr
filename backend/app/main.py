@@ -892,6 +892,13 @@ def studio_render_status(render_id: UUID):
     with SessionLocal() as db:
         item = db.get(StudioRender, render_id)
         if item is None: raise HTTPException(404, "Studio render not found")
+        # A double click can create a short-lived duplicate record. Surface the
+        # still-running original to polling clients instead of a dead-end
+        # cancellation message.
+        if item.status == "failed" and (item.error_message or "").startswith("Cancelled duplicate export"):
+            active = db.query(StudioRender).filter(StudioRender.vod_id == item.vod_id, StudioRender.status.in_(["queued", "processing"])).order_by(StudioRender.created_at.asc()).first()
+            if active:
+                item = active
         return studio_render_data(item)
 
 
