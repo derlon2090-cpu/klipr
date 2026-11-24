@@ -856,6 +856,7 @@ async def create_studio_render(
         render_id = render.id
     folder = Path("/var/lib/klipr/studio") / str(render_id)
     try:
+        folder.mkdir(parents=True, exist_ok=True)
         intro_path = await _save_studio_upload(intro, folder / "intro.mp4", {".mp4", ".mov"}, 20 * 1024 * 1024 * 1024)
         outro_path = await _save_studio_upload(outro, folder / "outro.mp4", {".mp4", ".mov"}, 20 * 1024 * 1024 * 1024)
         # API runs as root to accept uploads; the Celery media worker is
