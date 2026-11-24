@@ -110,12 +110,15 @@ const durationText = (stream: Stream) =>
     : "—";
 const vodDuration = (seconds: number | null) => {
   if (!seconds) return "—";
-  const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60);
+  const h = Math.floor(seconds / 3600),
+    m = Math.floor((seconds % 3600) / 60);
   return h ? `${h}h ${m}m` : `${m}m`;
 };
 const fileSize = (bytes: number | null) => {
   if (!bytes) return "—";
-  return bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(2)} GB` : `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return bytes >= 1024 ** 3
+    ? `${(bytes / 1024 ** 3).toFixed(2)} GB`
+    : `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 };
 const vodQualityText = (vod: Vod) => {
   const fps = vod.fps ? Math.round(vod.fps) : null;
@@ -123,7 +126,8 @@ const vodQualityText = (vod: Vod) => {
   if (vod.height) return `${vod.height}p${fps || ""} Source`;
   return vod.quality === "4k" ? "4K 2160p60" : "Legacy source";
 };
-const bitrateText = (bitrate: number | null) => bitrate ? `${(bitrate / 1_000_000).toFixed(1)} Mbps` : "—";
+const bitrateText = (bitrate: number | null) =>
+  bitrate ? `${(bitrate / 1_000_000).toFixed(1)} Mbps` : "—";
 
 function SectionTitle({
   eyebrow,
@@ -165,11 +169,27 @@ function Empty({ text }: { text: string }) {
 const inputClass =
   "mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100";
 const emptyCredentials: Credentials = {
-  kick: { platform: "kick", has_session: false, status: "unset", updated_at: null, expires_at: null },
-  twitch: { platform: "twitch", has_session: false, status: "unset", updated_at: null, expires_at: null },
+  kick: {
+    platform: "kick",
+    has_session: false,
+    status: "unset",
+    updated_at: null,
+    expires_at: null,
+  },
+  twitch: {
+    platform: "twitch",
+    has_session: false,
+    status: "unset",
+    updated_at: null,
+    expires_at: null,
+  },
 };
 
-export function DashboardWorkspace({ initialSection = "live" }: { initialSection?: DashboardSection }) {
+export function DashboardWorkspace({
+  initialSection = "live",
+}: {
+  initialSection?: DashboardSection;
+}) {
   const { language } = useLanguage();
   const ar = language === "ar";
   const [section, setSection] = useState<DashboardSection>(initialSection),
@@ -201,8 +221,12 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
   const [suggestions, setSuggestions] = useState<CreatorSuggestion[]>([]),
     [suggestionsBusy, setSuggestionsBusy] = useState(false);
   const [credentials, setCredentials] = useState<Credentials>(emptyCredentials);
-  const [sessionInput, setSessionInput] = useState<Record<"kick" | "twitch", string>>({ kick: "", twitch: "" });
-  const [sessionBusy, setSessionBusy] = useState<"kick" | "twitch" | null>(null);
+  const [sessionInput, setSessionInput] = useState<
+    Record<"kick" | "twitch", string>
+  >({ kick: "", twitch: "" });
+  const [sessionBusy, setSessionBusy] = useState<"kick" | "twitch" | null>(
+    null,
+  );
   const [vods, setVods] = useState<Vod[]>([]);
   const [vodUrl, setVodUrl] = useState("");
   const vodQuality = "4k" as const;
@@ -210,19 +234,30 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
   const [studioVodId, setStudioVodId] = useState("");
   const [studioIntro, setStudioIntro] = useState<File | null>(null);
   const [studioOutro, setStudioOutro] = useState<File | null>(null);
-  const [studioExportQuality, setStudioExportQuality] = useState<"original" | "4k">("original");
+  const [studioExportQuality, setStudioExportQuality] = useState<
+    "original" | "4k"
+  >("original");
   const [studioRender, setStudioRender] = useState<StudioRender | null>(null);
   const [studioBusy, setStudioBusy] = useState(false);
+  const [editorRanges, setEditorRanges] = useState<
+    Record<string, { start: string; end: string }>
+  >({});
   const [smartVodId, setSmartVodId] = useState("");
-  const [smartPlatform, setSmartPlatform] = useState<SmartThumbnail["platform"]>("youtube");
-  const [smartStyle, setSmartStyle] = useState<SmartThumbnail["frame_style"]>("bold");
+  const [smartPlatform, setSmartPlatform] =
+    useState<SmartThumbnail["platform"]>("youtube");
+  const [smartStyle, setSmartStyle] =
+    useState<SmartThumbnail["frame_style"]>("bold");
   const [smartItems, setSmartItems] = useState<SmartThumbnail[]>([]);
   const [smartBusy, setSmartBusy] = useState(false);
   const [metadataVodId, setMetadataVodId] = useState("");
   const [aiMetadata, setAiMetadata] = useState<AiMetadata | null>(null);
   const [metadataBusy, setMetadataBusy] = useState(false);
 
-  const loadCredentials = () => api.credentials().then(setCredentials).catch(() => undefined);
+  const loadCredentials = () =>
+    api
+      .credentials()
+      .then(setCredentials)
+      .catch(() => undefined);
 
   const loadSuggestions = async () => {
     setSuggestionsBusy(true);
@@ -259,7 +294,11 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
       );
     }
   };
-  const loadVods = () => api.vods().then(setVods).catch(() => undefined);
+  const loadVods = () =>
+    api
+      .vods()
+      .then(setVods)
+      .catch(() => undefined);
   useEffect(() => {
     const query = new URLSearchParams(window.location.search).get(
       "section",
@@ -281,28 +320,58 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
   useEffect(() => {
     if (section === "suggestions") loadSuggestions();
     if (section === "sessions") loadCredentials();
-    if (["vods", "shorts", "metadata", "thumbnails", "suggestions"].includes(section)) loadVods();
+    if (
+      ["vods", "shorts", "metadata", "thumbnails", "suggestions"].includes(
+        section,
+      )
+    )
+      loadVods();
   }, [section]);
   useEffect(() => {
-    if (!studioRender || !["queued", "processing"].includes(studioRender.status)) return;
-    const timer = window.setInterval(() => api.studioRender(studioRender.id).then(setStudioRender).catch(() => undefined), 2500);
+    if (
+      !studioRender ||
+      !["queued", "processing"].includes(studioRender.status)
+    )
+      return;
+    const timer = window.setInterval(
+      () =>
+        api
+          .studioRender(studioRender.id)
+          .then(setStudioRender)
+          .catch(() => undefined),
+      2500,
+    );
     return () => window.clearInterval(timer);
   }, [studioRender?.id, studioRender?.status]);
   useEffect(() => {
-    if (!smartItems.some((item) => item.status === "queued" || item.status === "processing")) return;
+    if (
+      !smartItems.some(
+        (item) => item.status === "queued" || item.status === "processing",
+      )
+    )
+      return;
     const timer = window.setInterval(() => {
       Promise.all(smartItems.map((item) => api.smartThumbnail(item.id)))
-        .then(setSmartItems).catch(() => undefined);
+        .then(setSmartItems)
+        .catch(() => undefined);
     }, 2500);
     return () => window.clearInterval(timer);
   }, [smartItems]);
   useEffect(() => {
-    if (section !== "vods" || !vods.some((vod) => !["ready", "failed"].includes(vod.status))) return;
+    if (
+      section !== "vods" ||
+      !vods.some((vod) => !["ready", "failed"].includes(vod.status))
+    )
+      return;
     const timer = setInterval(loadVods, 2500);
     return () => clearInterval(timer);
   }, [section, vods]);
   useEffect(() => {
-    if (section !== "clips" || !streams.some((stream) => stream.status === "processing")) return;
+    if (
+      section !== "clips" ||
+      !streams.some((stream) => stream.status === "processing")
+    )
+      return;
     const timer = setInterval(load, 3000);
     return () => clearInterval(timer);
   }, [section, streams]);
@@ -366,11 +435,19 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
   const changeSection = (next: DashboardSection) => {
     setSection(next);
     const directPaths: Partial<Record<DashboardSection, string>> = {
-      vods: "/dashboard?section=vods", shorts: "/dashboard?section=shorts", metadata: "/dashboard?section=metadata",
-      thumbnails: "/dashboard?section=thumbnails", suggestions: "/dashboard?section=suggestions",
-      sessions: "/dashboard?section=sessions", settings: "/dashboard?section=settings",
+      vods: "/dashboard?section=vods",
+      shorts: "/dashboard?section=shorts",
+      metadata: "/dashboard?section=metadata",
+      thumbnails: "/dashboard?section=thumbnails",
+      suggestions: "/dashboard?section=suggestions",
+      sessions: "/dashboard?section=sessions",
+      settings: "/dashboard?section=settings",
     };
-    window.history.replaceState(null, "", directPaths[next] || `/dashboard?section=${next}`);
+    window.history.replaceState(
+      null,
+      "",
+      directPaths[next] || `/dashboard?section=${next}`,
+    );
     setMessage("");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -421,12 +498,23 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
     setMessage("");
     try {
       const item = await api.importVod(vodUrl.trim(), vodQuality);
-      setVods((current) => [item, ...current.filter((vod) => vod.id !== item.id)]);
+      setVods((current) => [
+        item,
+        ...current.filter((vod) => vod.id !== item.id),
+      ]);
       setVodUrl("");
-      setMessage(ar ? "بدأ جلب البث المحفوظ في الخلفية." : "VOD import started in the background.");
+      setMessage(
+        ar
+          ? "بدأ جلب البث المحفوظ في الخلفية."
+          : "VOD import started in the background.",
+      );
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not start VOD import");
-    } finally { setVodBusy(false); }
+      setMessage(
+        error instanceof Error ? error.message : "Could not start VOD import",
+      );
+    } finally {
+      setVodBusy(false);
+    }
   };
   const openVodInEditor = async (vod: Vod) => {
     setVodBusy(true);
@@ -435,9 +523,18 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
       setStreams((current) => [stream, ...current]);
       setSelected(stream.id);
       changeSection("shorts");
-      setMessage(ar ? "أصبح البث جاهزاً في أداة التقطيع." : "The VOD is ready in the clip editor.");
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not open VOD in editor"); }
-    finally { setVodBusy(false); }
+      setMessage(
+        ar
+          ? "أصبح البث جاهزاً في أداة التقطيع."
+          : "The VOD is ready in the clip editor.",
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Could not open VOD in editor",
+      );
+    } finally {
+      setVodBusy(false);
+    }
   };
   const generateVodClips = async (vod: Vod) => {
     setVodBusy(true);
@@ -446,25 +543,51 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
       await api.generateVodClips(vod.id);
       await load();
       changeSection("shorts");
-      setMessage(ar ? "بدأ التحليل والتقطيع التلقائي. ستُحفظ المقاطع النهائية في الأرشيف." : "Automatic analysis and clipping started. Finished clips will appear in the archive.");
+      setMessage(
+        ar
+          ? "بدأ التحليل والتقطيع التلقائي. ستُحفظ المقاطع النهائية في الأرشيف."
+          : "Automatic analysis and clipping started. Finished clips will appear in the archive.",
+      );
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not start automatic clips");
-    } finally { setVodBusy(false); }
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not start automatic clips",
+      );
+    } finally {
+      setVodBusy(false);
+    }
   };
   const removeVod = async (id: string) => {
-    try { await api.deleteVod(id); setVods((current) => current.filter((vod) => vod.id !== id)); }
-    catch (error) { setMessage(error instanceof Error ? error.message : "Could not delete VOD"); }
+    try {
+      await api.deleteVod(id);
+      setVods((current) => current.filter((vod) => vod.id !== id));
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Could not delete VOD",
+      );
+    }
   };
   const cancelVod = async (id: string) => {
     setVodBusy(true);
     setMessage("");
     try {
       const item = await api.cancelVod(id);
-      setVods((current) => current.map((vod) => vod.id === id ? item : vod));
-      setMessage(ar ? "تم إلغاء المعالجة فورياً وتحرير العامل." : "Processing cancelled immediately and the worker was released.");
+      setVods((current) => current.map((vod) => (vod.id === id ? item : vod)));
+      setMessage(
+        ar
+          ? "تم إلغاء المعالجة فورياً وتحرير العامل."
+          : "Processing cancelled immediately and the worker was released.",
+      );
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not cancel VOD processing");
-    } finally { setVodBusy(false); }
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not cancel VOD processing",
+      );
+    } finally {
+      setVodBusy(false);
+    }
   };
   const generateMetadata = async (regenerate = false) => {
     if (!metadataVodId) return;
@@ -472,10 +595,18 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
     setMessage("");
     try {
       setAiMetadata(await api.generateAiMetadata(metadataVodId, regenerate));
-      setMessage(ar ? "تم توليد العناوين والوصف والفصول بنجاح." : "Titles, description and chapters generated.");
+      setMessage(
+        ar
+          ? "تم توليد العناوين والوصف والفصول بنجاح."
+          : "Titles, description and chapters generated.",
+      );
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not generate metadata");
-    } finally { setMetadataBusy(false); }
+      setMessage(
+        error instanceof Error ? error.message : "Could not generate metadata",
+      );
+    } finally {
+      setMetadataBusy(false);
+    }
   };
   const copyText = async (value: string) => {
     await navigator.clipboard.writeText(value);
@@ -511,11 +642,24 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
     setBusy(true);
     setMessage("");
     try {
-      await api.process(stream.id, { duration_seconds: 30, max_clips: 3, layout_mode: "split", remove_music: stream.remove_music });
+      await api.process(stream.id, {
+        duration_seconds: 30,
+        max_clips: 3,
+        layout_mode: "split",
+        remove_music: stream.remove_music,
+      });
       await load();
-      setMessage(ar ? "بدأ التعديل التلقائي. ستتحدث البطاقة حتى اكتمال الشورتات." : "Automatic editing started. This card will update until the Shorts are ready.");
+      setMessage(
+        ar
+          ? "بدأ التعديل التلقائي. ستتحدث البطاقة حتى اكتمال الشورتات."
+          : "Automatic editing started. This card will update until the Shorts are ready.",
+      );
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not start automatic editing");
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not start automatic editing",
+      );
     } finally {
       setBusy(false);
     }
@@ -585,21 +729,40 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
   };
   const uploadOverlayLogo = async (file?: File) => {
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024 || !["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
-      setMessage(ar ? "اختر شعار PNG أو JPG أو WebP بحجم أقل من 5MB." : "Choose a PNG, JPG or WebP logo under 5MB.");
+    if (
+      file.size > 5 * 1024 * 1024 ||
+      !["image/png", "image/jpeg", "image/webp"].includes(file.type)
+    ) {
+      setMessage(
+        ar
+          ? "اختر شعار PNG أو JPG أو WebP بحجم أقل من 5MB."
+          : "Choose a PNG, JPG or WebP logo under 5MB.",
+      );
       return;
     }
     try {
       const result = await api.uploadOverlayLogo(file);
-      setBranding((current) => ({ ...current, overlay_logo_key: result.overlay_logo_key, overlay_logo_url: result.overlay_logo_url || URL.createObjectURL(file) }));
+      setBranding((current) => ({
+        ...current,
+        overlay_logo_key: result.overlay_logo_key,
+        overlay_logo_url: result.overlay_logo_url || URL.createObjectURL(file),
+      }));
       setMessage(ar ? "تم رفع شعار القالب." : "Preset logo uploaded.");
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Upload failed"); }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Upload failed");
+    }
   };
   const deleteOverlayLogo = async () => {
     try {
       await api.deleteOverlayLogo();
-      setBranding((current) => ({ ...current, overlay_logo_key: null, overlay_logo_url: null }));
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Delete failed"); }
+      setBranding((current) => ({
+        ...current,
+        overlay_logo_key: null,
+        overlay_logo_url: null,
+      }));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Delete failed");
+    }
   };
   const persistPreset = async (patch: Partial<Branding>) => {
     const next = { ...branding, ...patch };
@@ -1334,15 +1497,46 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
                   </div>
                   {stream.status === "processing" ? (
                     <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-center text-sm font-black text-emerald-700">
-                      <span className="inline-flex items-center gap-2"><Sparkles size={16} className="animate-pulse" />{ar ? "جارٍ تحليل البث وتعديل الشورتات تلقائياً…" : "Analyzing and editing Shorts automatically…"}</span>
+                      <span className="inline-flex items-center gap-2">
+                        <Sparkles size={16} className="animate-pulse" />
+                        {ar
+                          ? "جارٍ تحليل البث وتعديل الشورتات تلقائياً…"
+                          : "Analyzing and editing Shorts automatically…"}
+                      </span>
                     </div>
                   ) : (stream.clip_count ?? 0) > 0 ? (
                     <div className="mt-5 grid grid-cols-2 gap-2">
-                      <button onClick={() => setArchiveKind("short")} className="col-span-2 inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-500 px-3 py-3 text-xs font-black text-white"><Clapperboard size={15}/>{ar ? `عرض الشورتات الجاهزة (${stream.clip_count})` : `View ready Shorts (${stream.clip_count})`}</button>
-                      {stream.master_url && <a href={stream.master_url} download className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold"><Download size={14}/>{ar ? "تنزيل البث الأصلي" : "Original VOD"}</a>}
+                      <button
+                        onClick={() => setArchiveKind("short")}
+                        className="col-span-2 inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-500 px-3 py-3 text-xs font-black text-white"
+                      >
+                        <Clapperboard size={15} />
+                        {ar
+                          ? `عرض الشورتات الجاهزة (${stream.clip_count})`
+                          : `View ready Shorts (${stream.clip_count})`}
+                      </button>
+                      {stream.master_url && (
+                        <a
+                          href={stream.master_url}
+                          download
+                          className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold"
+                        >
+                          <Download size={14} />
+                          {ar ? "تنزيل البث الأصلي" : "Original VOD"}
+                        </a>
+                      )}
                     </div>
                   ) : (
-                    <button onClick={() => generateArchiveClips(stream)} disabled={busy || !stream.master_url} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 font-black text-white disabled:opacity-50"><WandSparkles size={17}/>{ar ? "تعديل المقاطع تلقائياً" : "Edit clips automatically"}</button>
+                    <button
+                      onClick={() => generateArchiveClips(stream)}
+                      disabled={busy || !stream.master_url}
+                      className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 font-black text-white disabled:opacity-50"
+                    >
+                      <WandSparkles size={17} />
+                      {ar
+                        ? "تعديل المقاطع تلقائياً"
+                        : "Edit clips automatically"}
+                    </button>
                   )}
                   <button
                     onClick={() => setDeleting(stream.id)}
@@ -1573,7 +1767,9 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
                       : "Save a 9:16 cover in Thumbnail Studio first."}
                 </p>
                 <p className="mt-2 text-xs font-black text-emerald-700">
-                  {ar ? "يتم إنشاء غلاف كل مقطع تلقائياً." : "Every clip cover is created automatically."}
+                  {ar
+                    ? "يتم إنشاء غلاف كل مقطع تلقائياً."
+                    : "Every clip cover is created automatically."}
                 </p>
               </div>
             </div>
@@ -1726,14 +1922,201 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
         }
       />
       <section className="mb-6 rounded-3xl border border-violet-200 bg-[linear-gradient(135deg,#f5f3ff,#ffffff)] p-6 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="text-xl font-black">{ar ? "صانع الثامبنيل بالذكاء الاصطناعي" : "AI Thumbnail Studio"}</h2><p className="mt-1 text-sm text-slate-600">{ar ? "حلّل البث المختار واحصل على 3 لقطات مع عناوين عربية قابلة للتنزيل." : "Analyze a saved VOD and get three downloadable, captioned moments."}</p></div><span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-black text-violet-700">OpenAI Vision + DeepSeek</span></div>
-        <div className="mt-5 grid gap-3 lg:grid-cols-4">
-          <select value={smartVodId} onChange={(event) => setSmartVodId(event.target.value)} className={inputClass}><option value="">{ar ? "اختر بثاً محفوظاً" : "Choose a saved VOD"}</option>{vods.filter((vod) => vod.status === "ready").map((vod) => <option key={vod.id} value={vod.id}>{vod.title || "Untitled VOD"}</option>)}</select>
-          <select value={smartPlatform} onChange={(event) => setSmartPlatform(event.target.value as SmartThumbnail["platform"])} className={inputClass}><option value="youtube">YouTube · 16:9 · Original quality</option><option value="tiktok">TikTok · 9:16 · 1080×1920</option><option value="shorts">YouTube Shorts · 9:16</option><option value="reels">Reels · 9:16</option><option value="x">X / Twitter · 16:9 · Original quality</option><option value="kick">Kick · 16:9 · Original quality</option></select>
-          <select value={smartStyle} onChange={(event) => setSmartStyle(event.target.value as SmartThumbnail["frame_style"])} className={inputClass}><option value="bold">{ar ? "إطار حماسي عالي التباين" : "Bold high-contrast frame"}</option><option value="clean">{ar ? "إطار نظيف" : "Clean platform frame"}</option><option value="none">{ar ? "بدون إطار" : "No frame"}</option></select>
-          <button disabled={smartBusy || !smartVodId} onClick={async () => { setSmartBusy(true); setMessage(""); try { setSmartItems(await api.createSmartThumbnails(smartVodId, smartPlatform, smartStyle)); setMessage(ar ? "بدأ تحليل أقوى اللحظات وترتيب أوضح اللقطات — ستظهر 3 اقتراحات احترافية عند اكتماله." : "Analysing the strongest moments and clearest frames — three polished suggestions will appear here."); } catch (error) { setMessage(error instanceof Error ? error.message : "Could not start thumbnail analysis"); } finally { setSmartBusy(false); } }} className="mt-2 inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-3 font-black text-white hover:bg-violet-700 disabled:opacity-50"><WandSparkles size={18}/>{smartBusy ? (ar ? "جارٍ البدء…" : "Starting…") : (ar ? "اختيار أقوى اللقطات وصناعة الثامبنيل" : "Choose best moments & generate")}</button>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-black">
+              {ar ? "صانع الثامبنيل بالذكاء الاصطناعي" : "AI Thumbnail Studio"}
+            </h2>
+            <p className="mt-1 text-sm text-slate-600">
+              {ar
+                ? "حلّل البث المختار واحصل على 3 لقطات مع عناوين عربية قابلة للتنزيل."
+                : "Analyze a saved VOD and get three downloadable, captioned moments."}
+            </p>
+          </div>
+          <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-black text-violet-700">
+            OpenAI Vision + DeepSeek
+          </span>
         </div>
-        {smartItems.length > 0 && <div className="mt-6 grid gap-5 md:grid-cols-3">{smartItems.map((item, index) => <article key={item.id} className="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="aspect-video shrink-0 bg-slate-100">{item.image_url ? <img src={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${item.image_url}`} alt={item.headline || "AI thumbnail"} className="h-full w-full object-cover"/> : <div className="grid h-full place-items-center text-sm font-bold text-slate-400">{item.status === "failed" ? (ar ? "فشل التوليد" : "Generation failed") : `${Math.round(item.progress)}%`}</div>}</div><div className="flex flex-1 flex-col p-4"><span className="text-[11px] font-black tracking-wide text-violet-600">{ar ? `أفضل لحظة ${index + 1}` : `TOP MOMENT ${index + 1}`}</span><p className="mt-1 min-h-12 font-black">{item.headline || (ar ? "يجري اختيار أوضح لقطة من أقوى لحظة…" : "Choosing the clearest frame from a top moment…")}</p>{item.context && <p className="mt-2 line-clamp-2 text-xs text-slate-500">{item.context}</p>}{item.error && <p className="mt-2 text-xs text-rose-600">{item.error}</p>}{item.image_url && <div className="mt-4 grid grid-cols-2 gap-2"><button onClick={async () => { try { const saved = await api.approveSmartThumbnail(item.id); setSavedThumbnails((current) => [saved, ...current.filter((entry) => entry.id !== saved.id).map((entry) => ({...entry, selected: entry.kind === "vod" ? false : entry.selected}))]); setMessage(ar ? "تم اعتماد الثامبنيل وحفظه في المكتبة." : "Thumbnail approved and saved to the library."); } catch (error) { setMessage(error instanceof Error ? error.message : "Could not approve thumbnail"); } }} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white">{ar ? "اعتماد وحفظ" : "Approve & save"}</button><a href={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${item.image_url}`} download className="inline-flex items-center justify-center gap-2 rounded-xl border border-violet-200 px-3 py-2 text-xs font-black text-violet-700"><Download size={15}/>{ar ? "تنزيل" : "Download"}</a></div>}</div></article>)}</div>}
+        <div className="mt-5 grid gap-3 lg:grid-cols-4">
+          <select
+            value={smartVodId}
+            onChange={(event) => setSmartVodId(event.target.value)}
+            className={inputClass}
+          >
+            <option value="">
+              {ar ? "اختر بثاً محفوظاً" : "Choose a saved VOD"}
+            </option>
+            {vods
+              .filter((vod) => vod.status === "ready")
+              .map((vod) => (
+                <option key={vod.id} value={vod.id}>
+                  {vod.title || "Untitled VOD"}
+                </option>
+              ))}
+          </select>
+          <select
+            value={smartPlatform}
+            onChange={(event) =>
+              setSmartPlatform(event.target.value as SmartThumbnail["platform"])
+            }
+            className={inputClass}
+          >
+            <option value="youtube">YouTube · 16:9 · Original quality</option>
+            <option value="tiktok">TikTok · 9:16 · 1080×1920</option>
+            <option value="shorts">YouTube Shorts · 9:16</option>
+            <option value="reels">Reels · 9:16</option>
+            <option value="x">X / Twitter · 16:9 · Original quality</option>
+            <option value="kick">Kick · 16:9 · Original quality</option>
+          </select>
+          <select
+            value={smartStyle}
+            onChange={(event) =>
+              setSmartStyle(event.target.value as SmartThumbnail["frame_style"])
+            }
+            className={inputClass}
+          >
+            <option value="bold">
+              {ar ? "إطار حماسي عالي التباين" : "Bold high-contrast frame"}
+            </option>
+            <option value="clean">
+              {ar ? "إطار نظيف" : "Clean platform frame"}
+            </option>
+            <option value="none">{ar ? "بدون إطار" : "No frame"}</option>
+          </select>
+          <button
+            disabled={smartBusy || !smartVodId}
+            onClick={async () => {
+              setSmartBusy(true);
+              setMessage("");
+              try {
+                setSmartItems(
+                  await api.createSmartThumbnails(
+                    smartVodId,
+                    smartPlatform,
+                    smartStyle,
+                  ),
+                );
+                setMessage(
+                  ar
+                    ? "بدأ تحليل أقوى اللحظات وترتيب أوضح اللقطات — ستظهر 3 اقتراحات احترافية عند اكتماله."
+                    : "Analysing the strongest moments and clearest frames — three polished suggestions will appear here.",
+                );
+              } catch (error) {
+                setMessage(
+                  error instanceof Error
+                    ? error.message
+                    : "Could not start thumbnail analysis",
+                );
+              } finally {
+                setSmartBusy(false);
+              }
+            }}
+            className="mt-2 inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-3 font-black text-white hover:bg-violet-700 disabled:opacity-50"
+          >
+            <WandSparkles size={18} />
+            {smartBusy
+              ? ar
+                ? "جارٍ البدء…"
+                : "Starting…"
+              : ar
+                ? "اختيار أقوى اللقطات وصناعة الثامبنيل"
+                : "Choose best moments & generate"}
+          </button>
+        </div>
+        {smartItems.length > 0 && (
+          <div className="mt-6 grid gap-5 md:grid-cols-3">
+            {smartItems.map((item, index) => (
+              <article
+                key={item.id}
+                className="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+              >
+                <div className="aspect-video shrink-0 bg-slate-100">
+                  {item.image_url ? (
+                    <img
+                      src={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${item.image_url}`}
+                      alt={item.headline || "AI thumbnail"}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="grid h-full place-items-center text-sm font-bold text-slate-400">
+                      {item.status === "failed"
+                        ? ar
+                          ? "فشل التوليد"
+                          : "Generation failed"
+                        : `${Math.round(item.progress)}%`}
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-1 flex-col p-4">
+                  <span className="text-[11px] font-black tracking-wide text-violet-600">
+                    {ar ? `أفضل لحظة ${index + 1}` : `TOP MOMENT ${index + 1}`}
+                  </span>
+                  <p className="mt-1 min-h-12 font-black">
+                    {item.headline ||
+                      (ar
+                        ? "يجري اختيار أوضح لقطة من أقوى لحظة…"
+                        : "Choosing the clearest frame from a top moment…")}
+                  </p>
+                  {item.context && (
+                    <p className="mt-2 line-clamp-2 text-xs text-slate-500">
+                      {item.context}
+                    </p>
+                  )}
+                  {item.error && (
+                    <p className="mt-2 text-xs text-rose-600">{item.error}</p>
+                  )}
+                  {item.image_url && (
+                    <div className="mt-4 grid grid-cols-2 gap-2">
+                      <button
+                        onClick={async () => {
+                          try {
+                            const saved = await api.approveSmartThumbnail(
+                              item.id,
+                            );
+                            setSavedThumbnails((current) => [
+                              saved,
+                              ...current
+                                .filter((entry) => entry.id !== saved.id)
+                                .map((entry) => ({
+                                  ...entry,
+                                  selected:
+                                    entry.kind === "vod"
+                                      ? false
+                                      : entry.selected,
+                                })),
+                            ]);
+                            setMessage(
+                              ar
+                                ? "تم اعتماد الثامبنيل وحفظه في المكتبة."
+                                : "Thumbnail approved and saved to the library.",
+                            );
+                          } catch (error) {
+                            setMessage(
+                              error instanceof Error
+                                ? error.message
+                                : "Could not approve thumbnail",
+                            );
+                          }
+                        }}
+                        className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white"
+                      >
+                        {ar ? "اعتماد وحفظ" : "Approve & save"}
+                      </button>
+                      <a
+                        href={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${item.image_url}`}
+                        download
+                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-violet-200 px-3 py-2 text-xs font-black text-violet-700"
+                      >
+                        <Download size={15} />
+                        {ar ? "تنزيل" : "Download"}
+                      </a>
+                    </div>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
       </section>
       <div className="grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
         <aside className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -1748,7 +2131,9 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
               >
                 <b className="block text-sm">16:9</b>
                 <span className="mt-1 block text-xs text-slate-400">
-                  {ar ? "مقطع عادي · الدقة الأصلية" : "Regular VOD · original quality"}
+                  {ar
+                    ? "مقطع عادي · الدقة الأصلية"
+                    : "Regular VOD · original quality"}
                 </span>
               </button>
               <button
@@ -1799,9 +2184,17 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
                   ? "Save vertical Short cover"
                   : "Save regular VOD cover"}
           </button>
-          {savedThumbnails.find((item) => item.kind === thumbFormat && item.selected) && (
-            <a href={`${process.env.NEXT_PUBLIC_API_URL || "/api"}/branding/thumbnails/${savedThumbnails.find((item) => item.kind === thumbFormat && item.selected)?.id}/download`} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 font-black text-emerald-800 hover:bg-emerald-100">
-              <Download size={17}/>{ar ? "تنزيل الثامبنيل بجودة كاملة" : "Download full-quality thumbnail"}
+          {savedThumbnails.find(
+            (item) => item.kind === thumbFormat && item.selected,
+          ) && (
+            <a
+              href={`${process.env.NEXT_PUBLIC_API_URL || "/api"}/branding/thumbnails/${savedThumbnails.find((item) => item.kind === thumbFormat && item.selected)?.id}/download`}
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 font-black text-emerald-800 hover:bg-emerald-100"
+            >
+              <Download size={17} />
+              {ar
+                ? "تنزيل الثامبنيل بجودة كاملة"
+                : "Download full-quality thumbnail"}
             </a>
           )}
           {(thumbFormat === "short"
@@ -1833,7 +2226,9 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
               {ar ? "المعاينة الحية" : "Live preview"}
             </h2>
             <span className="text-xs text-slate-400">
-              {thumbFormat === "short" ? "1080 × 1920" : "1920 × 1080 · Original quality"}
+              {thumbFormat === "short"
+                ? "1080 × 1920"
+                : "1920 × 1080 · Original quality"}
             </span>
           </div>
           <div
@@ -2161,50 +2556,252 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
 
   const startStudioRender = async () => {
     if (!studioVodId) {
-      setMessage(ar ? "اختر بثاً جاهزاً من مكتبة البثوث أولاً." : "Select a ready VOD from the vault first.");
+      setMessage(
+        ar
+          ? "اختر بثاً جاهزاً من مكتبة البثوث أولاً."
+          : "Select a ready VOD from the vault first.",
+      );
       return;
     }
     setStudioBusy(true);
     try {
-      const render = await api.createStudioRender(studioVodId, { exportQuality: studioExportQuality, intro: studioIntro, outro: studioOutro });
+      const render = await api.createStudioRender(studioVodId, {
+        exportQuality: studioExportQuality,
+        intro: studioIntro,
+        outro: studioOutro,
+      });
       setStudioRender(render);
-      setMessage(ar ? "بدأ تجهيز المقطع — يمكنك متابعة التقدم هنا." : "Render started — follow its progress here.");
+      setMessage(
+        ar
+          ? "بدأ تجهيز المقطع — يمكنك متابعة التقدم هنا."
+          : "Render started — follow its progress here.",
+      );
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : (ar ? "تعذّر بدء التجهيز." : "Could not start the render."));
-    } finally { setStudioBusy(false); }
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : ar
+            ? "تعذّر بدء التجهيز."
+            : "Could not start the render.",
+      );
+    } finally {
+      setStudioBusy(false);
+    }
+  };
+  const startEditorialRange = async (vod: Vod) => {
+    const range = editorRanges[vod.id] || {
+      start: "0",
+      end: String(Math.min(vod.duration_seconds || 60, 300)),
+    };
+    const start = Number(range.start),
+      end = Number(range.end);
+    if (
+      !Number.isFinite(start) ||
+      !Number.isFinite(end) ||
+      start < 0 ||
+      end <= start
+    ) {
+      setMessage(
+        ar
+          ? "أدخل بداية ونهاية صحيحتين بالثواني."
+          : "Enter a valid start and end time in seconds.",
+      );
+      return;
+    }
+    setStudioBusy(true);
+    try {
+      const render = await api.createStudioRender(vod.id, {
+        exportQuality: "original",
+        startSeconds: start,
+        endSeconds: end,
+      });
+      setStudioRender(render);
+      setStudioVodId(vod.id);
+      setMessage(
+        ar
+          ? "بدأ حفظ الجزء المحدد مع المقدمة والخاتمة تلقائياً."
+          : "Saving the selected range with the default intro and outro.",
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not start editorial export",
+      );
+    } finally {
+      setStudioBusy(false);
+    }
   };
   const studioView = (
     <>
-      <SectionTitle icon={Clapperboard} eyebrow={ar ? "استوديو الإنتاج" : "PRODUCTION STUDIO"} title={ar ? "الاستديو المتكامل" : "Production Studio"} description={ar ? "اختر بثاً محفوظاً، أضف المقدمة والنهاية، ثم جهّز ملف MP4 موحداً وجاهزاً للتنزيل." : "Choose a vault VOD, add an intro and outro, then render a normalized downloadable MP4."} />
+      <SectionTitle
+        icon={Clapperboard}
+        eyebrow={ar ? "استوديو الإنتاج" : "PRODUCTION STUDIO"}
+        title={ar ? "الاستديو المتكامل" : "Production Studio"}
+        description={
+          ar
+            ? "اختر بثاً محفوظاً، أضف المقدمة والنهاية، ثم جهّز ملف MP4 موحداً وجاهزاً للتنزيل."
+            : "Choose a vault VOD, add an intro and outro, then render a normalized downloadable MP4."
+        }
+      />
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_390px]">
         <section className="space-y-5 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <label className="block text-sm font-black">{ar ? "1. البث أو المقطع من مكتبة البثوث المحفوظة" : "1. VOD from the saved broadcast vault"}
-            <select value={studioVodId} onChange={(event) => setStudioVodId(event.target.value)} className={inputClass}>
-              <option value="">{ar ? "اختر بثاً جاهزاً" : "Choose a ready VOD"}</option>
-              {vods.filter((vod) => vod.status === "ready").map((vod) => <option key={vod.id} value={vod.id}>{vod.title || (ar ? "بث غير مسمى" : "Untitled broadcast")} · {vodDuration(vod.duration_seconds)}</option>)}
+          <label className="block text-sm font-black">
+            {ar
+              ? "1. البث أو المقطع من مكتبة البثوث المحفوظة"
+              : "1. VOD from the saved broadcast vault"}
+            <select
+              value={studioVodId}
+              onChange={(event) => setStudioVodId(event.target.value)}
+              className={inputClass}
+            >
+              <option value="">
+                {ar ? "اختر بثاً جاهزاً" : "Choose a ready VOD"}
+              </option>
+              {vods
+                .filter((vod) => vod.status === "ready")
+                .map((vod) => (
+                  <option key={vod.id} value={vod.id}>
+                    {vod.title || (ar ? "بث غير مسمى" : "Untitled broadcast")} ·{" "}
+                    {vodDuration(vod.duration_seconds)}
+                  </option>
+                ))}
             </select>
           </label>
-          {studioVodId && (() => { const vod = vods.find((item) => item.id === studioVodId); return vod?.download_url ? <video controls className="aspect-video w-full rounded-xl bg-black" src={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${vod.download_url}`} /> : null; })()}
+          {studioVodId &&
+            (() => {
+              const vod = vods.find((item) => item.id === studioVodId);
+              return vod?.download_url ? (
+                <video
+                  controls
+                  className="aspect-video w-full rounded-xl bg-black"
+                  src={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${vod.download_url}`}
+                />
+              ) : null;
+            })()}
           <div>
-            <p className="mb-3 text-sm font-black">{ar ? "2. المقدمة والنهاية" : "2. Intro & Outro"}</p>
+            <p className="mb-3 text-sm font-black">
+              {ar ? "2. المقدمة والنهاية" : "2. Intro & Outro"}
+            </p>
             <div className="grid gap-4 md:grid-cols-2">
-              <AssetPicker label={ar ? "فيديو المقدمة" : "Intro video"} accept="video/mp4,video/quicktime" file={studioIntro} onChange={setStudioIntro} hint="MP4 / MOV · optional" />
-              <AssetPicker label={ar ? "فيديو النهاية" : "Outro video"} accept="video/mp4,video/quicktime" file={studioOutro} onChange={setStudioOutro} hint="MP4 / MOV · optional" />
+              <AssetPicker
+                label={ar ? "فيديو المقدمة" : "Intro video"}
+                accept="video/mp4,video/quicktime"
+                file={studioIntro}
+                onChange={setStudioIntro}
+                hint="MP4 / MOV · optional"
+              />
+              <AssetPicker
+                label={ar ? "فيديو النهاية" : "Outro video"}
+                accept="video/mp4,video/quicktime"
+                file={studioOutro}
+                onChange={setStudioOutro}
+                hint="MP4 / MOV · optional"
+              />
             </div>
           </div>
           <div>
-            <p className="mb-3 text-sm font-black">{ar ? "جودة التصدير" : "Export quality"}</p>
+            <p className="mb-3 text-sm font-black">
+              {ar ? "جودة التصدير" : "Export quality"}
+            </p>
             <div className="grid gap-3 sm:grid-cols-2">
-              <button type="button" onClick={() => setStudioExportQuality("original")} className={`rounded-xl border p-4 text-start ${studioExportQuality === "original" ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-slate-200"}`}><b className="block text-sm">{ar ? "الجودة الأصلية" : "Original quality"}</b><span className="mt-1 block text-xs opacity-70">1080p · {ar ? "حتى 60fps" : "up to 60fps"}</span></button>
-              <button type="button" onClick={() => setStudioExportQuality("4k")} className={`rounded-xl border p-4 text-start ${studioExportQuality === "4k" ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-slate-200"}`}><b className="block text-sm">4K Ultra HD</b><span className="mt-1 block text-xs opacity-70">3840×2160 · 60fps · CRF 16</span></button>
+              <button
+                type="button"
+                onClick={() => setStudioExportQuality("original")}
+                className={`rounded-xl border p-4 text-start ${studioExportQuality === "original" ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-slate-200"}`}
+              >
+                <b className="block text-sm">
+                  {ar ? "الجودة الأصلية" : "Original quality"}
+                </b>
+                <span className="mt-1 block text-xs opacity-70">
+                  1080p · {ar ? "حتى 60fps" : "up to 60fps"}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setStudioExportQuality("4k")}
+                className={`rounded-xl border p-4 text-start ${studioExportQuality === "4k" ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-slate-200"}`}
+              >
+                <b className="block text-sm">4K Ultra HD</b>
+                <span className="mt-1 block text-xs opacity-70">
+                  3840×2160 · 60fps · CRF 16
+                </span>
+              </button>
             </div>
           </div>
-          <button onClick={startStudioRender} disabled={studioBusy || !studioVodId} className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-3.5 font-black text-white disabled:opacity-50"><Sparkles size={18}/>{studioBusy ? (ar ? "جارٍ الحفظ…" : "Saving…") : (ar ? "3. حفظ وتجهيز" : "3. Save & Render")}</button>
-          <p className="text-xs leading-5 text-slate-500">{ar ? "توحيد تلقائي: 1920×1080، معدل الإطارات المصدر، وصوت AAC بتردد 48kHz، ثم دمج المقدمة + البث + النهاية." : "Automatic normalization: 1920×1080, source FPS and AAC 48kHz; then Intro + VOD + Outro."}</p>
+          <button
+            onClick={startStudioRender}
+            disabled={studioBusy || !studioVodId}
+            className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-3.5 font-black text-white disabled:opacity-50"
+          >
+            <Sparkles size={18} />
+            {studioBusy
+              ? ar
+                ? "جارٍ الحفظ…"
+                : "Saving…"
+              : ar
+                ? "3. حفظ وتجهيز"
+                : "3. Save & Render"}
+          </button>
+          <p className="text-xs leading-5 text-slate-500">
+            {ar
+              ? "توحيد تلقائي: 1920×1080، معدل الإطارات المصدر، وصوت AAC بتردد 48kHz، ثم دمج المقدمة + البث + النهاية."
+              : "Automatic normalization: 1920×1080, source FPS and AAC 48kHz; then Intro + VOD + Outro."}
+          </p>
         </section>
         <aside className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="font-black">{ar ? "حالة التجهيز" : "Render status"}</h2>
-          {studioRender ? <div className="mt-5"><div className="flex justify-between text-sm font-bold"><span>{studioRender.status === "ready" ? (ar ? "مكتمل" : "Ready") : studioRender.status === "failed" ? (ar ? "فشل" : "Failed") : (ar ? "قيد المعالجة" : "Processing")}</span><span>{Math.round(studioRender.progress)}%</span></div><div className="mt-2 h-3 overflow-hidden rounded-full bg-slate-100"><div className={`h-full rounded-full ${studioRender.status === "failed" ? "bg-rose-500" : "bg-emerald-500"}`} style={{width: `${studioRender.progress}%`}} /></div>{studioRender.error && <p className="mt-4 rounded-xl bg-rose-50 p-3 text-xs text-rose-700">{studioRender.error}</p>}{studioRender.download_url && <a href={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${studioRender.download_url}`} download className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 font-black text-white"><Download size={17}/>{ar ? "تنزيل المقطع النهائي MP4" : "Download final MP4"}</a>}</div> : <Empty text={ar ? "اختر بثاً وارفع المقدمة أو النهاية، ثم اضغط حفظ وتجهيز." : "Choose a VOD, add an intro or outro, then save and render."} />}
+          <h2 className="font-black">
+            {ar ? "حالة التجهيز" : "Render status"}
+          </h2>
+          {studioRender ? (
+            <div className="mt-5">
+              <div className="flex justify-between text-sm font-bold">
+                <span>
+                  {studioRender.status === "ready"
+                    ? ar
+                      ? "مكتمل"
+                      : "Ready"
+                    : studioRender.status === "failed"
+                      ? ar
+                        ? "فشل"
+                        : "Failed"
+                      : ar
+                        ? "قيد المعالجة"
+                        : "Processing"}
+                </span>
+                <span>{Math.round(studioRender.progress)}%</span>
+              </div>
+              <div className="mt-2 h-3 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className={`h-full rounded-full ${studioRender.status === "failed" ? "bg-rose-500" : "bg-emerald-500"}`}
+                  style={{ width: `${studioRender.progress}%` }}
+                />
+              </div>
+              {studioRender.error && (
+                <p className="mt-4 rounded-xl bg-rose-50 p-3 text-xs text-rose-700">
+                  {studioRender.error}
+                </p>
+              )}
+              {studioRender.download_url && (
+                <a
+                  href={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${studioRender.download_url}`}
+                  download
+                  className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 font-black text-white"
+                >
+                  <Download size={17} />
+                  {ar ? "تنزيل المقطع النهائي MP4" : "Download final MP4"}
+                </a>
+              )}
+            </div>
+          ) : (
+            <Empty
+              text={
+                ar
+                  ? "اختر بثاً وارفع المقدمة أو النهاية، ثم اضغط حفظ وتجهيز."
+                  : "Choose a VOD, add an intro or outro, then save and render."
+              }
+            />
+          )}
         </aside>
       </div>
     </>
@@ -2341,9 +2938,7 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
                 </a>
               ) : (
                 <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-xs text-slate-400">
-                  {ar
-                    ? "لم يُرفق رابط للقناة."
-                    : "No channel URL was provided."}
+                  {ar ? "لم يُرفق رابط للقناة." : "No channel URL was provided."}
                 </p>
               )}
               <div className="mt-4 flex items-center justify-end gap-2">
@@ -2381,45 +2976,436 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
       <SectionTitle
         eyebrow={ar ? "استيراد محلي" : "Local lossless import"}
         title={ar ? "مكتبة البثوث المحفوظة" : "VOD Vault"}
-        description={ar ? "ألصق رابط بث محفوظ من Twitch أو Kick. يُحمّل بأعلى جودة متاحة ثم يُعاد تغليفه دون إعادة ترميز ليبقى جاهزاً للتقطيع." : "Paste a saved Twitch or Kick broadcast URL. It downloads at the best available quality and is remuxed without re-encoding for fast editing."}
+        description={
+          ar
+            ? "ألصق رابط بث محفوظ من Twitch أو Kick. يُحمّل بأعلى جودة متاحة ثم يُعاد تغليفه دون إعادة ترميز ليبقى جاهزاً للتقطيع."
+            : "Paste a saved Twitch or Kick broadcast URL. It downloads at the best available quality and is remuxed without re-encoding for fast editing."
+        }
         icon={FolderDown}
       />
-      <form onSubmit={importVod} className="mb-7 rounded-2xl border border-emerald-200 bg-gradient-to-br from-white to-emerald-50 p-5 shadow-sm">
+      <form
+        onSubmit={importVod}
+        className="mb-7 rounded-2xl border border-emerald-200 bg-gradient-to-br from-white to-emerald-50 p-5 shadow-sm"
+      >
         <div className="flex flex-col gap-3 lg:flex-row">
           <div className="relative min-w-0 flex-1">
-            <input value={vodUrl} onChange={(event) => setVodUrl(event.target.value)} dir="ltr" placeholder="https://www.twitch.tv/videos/...  أو  https://kick.com/user/videos/..." className={`${inputClass} mt-0 ps-11`} />
-            <span className={`absolute start-3 top-3.5 text-xs font-black ${/twitch/i.test(vodUrl) ? "text-violet-600" : /kick/i.test(vodUrl) ? "text-lime-600" : "text-slate-400"}`}>{/twitch/i.test(vodUrl) ? "TW" : /kick/i.test(vodUrl) ? "K" : "URL"}</span>
+            <input
+              value={vodUrl}
+              onChange={(event) => setVodUrl(event.target.value)}
+              dir="ltr"
+              placeholder="https://www.twitch.tv/videos/...  أو  https://kick.com/user/videos/..."
+              className={`${inputClass} mt-0 ps-11`}
+            />
+            <span
+              className={`absolute start-3 top-3.5 text-xs font-black ${/twitch/i.test(vodUrl) ? "text-violet-600" : /kick/i.test(vodUrl) ? "text-lime-600" : "text-slate-400"}`}
+            >
+              {/twitch/i.test(vodUrl)
+                ? "TW"
+                : /kick/i.test(vodUrl)
+                  ? "K"
+                  : "URL"}
+            </span>
           </div>
-          <div className="flex items-center justify-center rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-800">{ar ? "أعلى جودة أصلية" : "Best original quality"}</div>
-          <button disabled={vodBusy || !vodUrl.trim()} className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 font-black text-white transition hover:bg-emerald-700 disabled:opacity-50"><FolderDown size={18}/>{ar ? "جلب وحفظ البث" : "Fetch & save VOD"}</button>
+          <div className="flex items-center justify-center rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-800">
+            {ar ? "أعلى جودة أصلية" : "Best original quality"}
+          </div>
+          <button
+            disabled={vodBusy || !vodUrl.trim()}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 font-black text-white transition hover:bg-emerald-700 disabled:opacity-50"
+          >
+            <FolderDown size={18} />
+            {ar ? "جلب وحفظ البث" : "Fetch & save VOD"}
+          </button>
         </div>
-        <p className="mt-3 text-xs leading-5 text-emerald-800">{ar ? "يسحب أعلى مصدر متاح بالتنزيل المتوازي ويحفظ دقته ومعدل إطاراته الأصليين دون تكبير وهمي. إن كان المصدر 4K/60 فسيبقى 4K/60، وإن كان 1080p/60 فسيحفظ 1080p/60 الحقيقي بسرعة." : "Fetches the best available source in parallel and preserves its native resolution and frame rate without artificial upscaling."}</p>
+        <p className="mt-3 text-xs leading-5 text-emerald-800">
+          {ar
+            ? "يسحب أعلى مصدر متاح بالتنزيل المتوازي ويحفظ دقته ومعدل إطاراته الأصليين دون تكبير وهمي. إن كان المصدر 4K/60 فسيبقى 4K/60، وإن كان 1080p/60 فسيحفظ 1080p/60 الحقيقي بسرعة."
+            : "Fetches the best available source in parallel and preserves its native resolution and frame rate without artificial upscaling."}
+        </p>
       </form>
-      {vods.some((vod) => !["ready", "failed"].includes(vod.status)) && <div className="mb-7 space-y-3">{vods.filter((vod) => !["ready", "failed"].includes(vod.status)).map((vod) => <article key={vod.id} className="overflow-hidden rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm"><div className="flex items-center justify-between gap-3"><div className="min-w-0"><p className="truncate font-black">{vod.title || (ar ? "جارٍ استخراج بيانات البث…" : "Fetching VOD metadata…")}</p><p className="mt-1 text-xs font-bold text-emerald-700">{vod.status === "fetching_metadata" ? (ar ? "استخراج البيانات" : "Fetching metadata") : vod.status === "remuxing" ? (ar ? "تجهيز MP4 سريع التقديم" : "Preparing seekable MP4") : (ar ? "تحميل البث" : "Downloading VOD")}</p></div><span className="text-sm font-black text-emerald-700">{Math.round(vod.progress)}%</span></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-emerald-500 transition-all" style={{width: `${Math.max(3, vod.progress)}%`}} /></div><div className="mt-3 flex items-center justify-between gap-4 text-xs text-slate-500"><div className="flex gap-4"><span>{vod.download_speed || "—"}</span><span>{vod.eta_seconds ? `${vod.eta_seconds}s ETA` : ""}</span></div><button type="button" onClick={() => cancelVod(vod.id)} disabled={vodBusy} className="rounded-lg border border-rose-200 px-3 py-2 font-black text-rose-600 hover:bg-rose-50 disabled:opacity-50">{ar ? "إلغاء المعالجة فوراً" : "Cancel now"}</button></div></article>)}</div>}
-      <div className="mb-3 flex items-center justify-between"><h2 className="text-lg font-black">{ar ? "البثوث الجاهزة" : "Ready broadcasts"}</h2><span className="text-xs font-bold text-slate-400">{vods.filter((vod) => vod.status === "ready").length}</span></div>
-      {vods.length === 0 ? <Empty text={ar ? "لم تُحفظ أي بثوث بعد. ألصق رابط VOD للبدء." : "No saved broadcasts yet. Paste a VOD URL to begin."} /> : <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">{vods.map((vod) => <article key={vod.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="relative aspect-video bg-slate-100">{vod.thumbnail_url ? <img src={vod.thumbnail_url.startsWith("/") ? `${process.env.NEXT_PUBLIC_API_URL || "/api"}${vod.thumbnail_url}` : vod.thumbnail_url} alt="" className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-slate-300"><Film size={36}/></div>}<span className={`absolute end-3 top-3 rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${platformClass(vod.platform)}`}>{vod.platform}</span><span className="absolute start-3 top-3 rounded-full bg-slate-950/85 px-2.5 py-1 text-[10px] font-black text-white backdrop-blur">{vodQualityText(vod)}</span></div><div className="p-4"><h3 className="truncate font-black">{vod.title || (ar ? "بث غير مسمّى" : "Untitled broadcast")}</h3><p className="mt-1 truncate text-xs text-slate-500">{vod.streamer_name || "—"}</p><div className="mt-3 flex flex-wrap gap-3 text-xs font-bold text-slate-500"><span>{vodDuration(vod.duration_seconds)}</span><span>{fileSize(vod.file_size)}</span><span>{bitrateText(vod.bitrate)}</span></div>{vod.status === "failed" ? <p className="mt-3 text-xs font-bold text-rose-600">{vod.error || (ar ? "فشل الاستيراد" : "Import failed")}</p> : vod.status === "ready" ? <div className="mt-4 grid grid-cols-2 gap-2"><button onClick={() => generateVodClips(vod)} disabled={vodBusy} className="col-span-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:opacity-50">{ar ? "إرسال لصناعة الشورتات" : "Send to Shorts"}</button><button onClick={() => { setMetadataVodId(vod.id); setAiMetadata(null); changeSection("metadata"); }} className="rounded-lg border border-emerald-200 px-3 py-2 text-xs font-black text-emerald-700">{ar ? "عنوان ووصف" : "Title & description"}</button><a href={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${vod.download_url || ""}`} download className="rounded-lg border border-slate-200 px-3 py-2 text-center text-xs font-black text-slate-700">{ar ? "تنزيل" : "Download"}</a><button onClick={() => removeVod(vod.id)} className="col-span-2 rounded-lg px-3 py-2 text-xs font-black text-rose-600 hover:bg-rose-50">{ar ? "حذف" : "Delete"}</button></div> : <p className="mt-3 text-xs font-bold text-slate-400">{ar ? "قيد المعالجة…" : "Processing…"}</p>}</div></article>)}</div>}
+      {vods.some((vod) => !["ready", "failed"].includes(vod.status)) && (
+        <div className="mb-7 space-y-3">
+          {vods
+            .filter((vod) => !["ready", "failed"].includes(vod.status))
+            .map((vod) => (
+              <article
+                key={vod.id}
+                className="overflow-hidden rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-black">
+                      {vod.title ||
+                        (ar
+                          ? "جارٍ استخراج بيانات البث…"
+                          : "Fetching VOD metadata…")}
+                    </p>
+                    <p className="mt-1 text-xs font-bold text-emerald-700">
+                      {vod.status === "fetching_metadata"
+                        ? ar
+                          ? "استخراج البيانات"
+                          : "Fetching metadata"
+                        : vod.status === "remuxing"
+                          ? ar
+                            ? "تجهيز MP4 سريع التقديم"
+                            : "Preparing seekable MP4"
+                          : ar
+                            ? "تحميل البث"
+                            : "Downloading VOD"}
+                    </p>
+                  </div>
+                  <span className="text-sm font-black text-emerald-700">
+                    {Math.round(vod.progress)}%
+                  </span>
+                </div>
+                <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className="h-full rounded-full bg-emerald-500 transition-all"
+                    style={{ width: `${Math.max(3, vod.progress)}%` }}
+                  />
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-4 text-xs text-slate-500">
+                  <div className="flex gap-4">
+                    <span>{vod.download_speed || "—"}</span>
+                    <span>
+                      {vod.eta_seconds ? `${vod.eta_seconds}s ETA` : ""}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => cancelVod(vod.id)}
+                    disabled={vodBusy}
+                    className="rounded-lg border border-rose-200 px-3 py-2 font-black text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+                  >
+                    {ar ? "إلغاء المعالجة فوراً" : "Cancel now"}
+                  </button>
+                </div>
+              </article>
+            ))}
+        </div>
+      )}
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-lg font-black">
+          {ar ? "البثوث الجاهزة" : "Ready broadcasts"}
+        </h2>
+        <span className="text-xs font-bold text-slate-400">
+          {vods.filter((vod) => vod.status === "ready").length}
+        </span>
+      </div>
+      {vods.length === 0 ? (
+        <Empty
+          text={
+            ar
+              ? "لم تُحفظ أي بثوث بعد. ألصق رابط VOD للبدء."
+              : "No saved broadcasts yet. Paste a VOD URL to begin."
+          }
+        />
+      ) : (
+        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+          {vods.map((vod) => (
+            <article
+              key={vod.id}
+              className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+            >
+              <div className="relative aspect-video bg-slate-100">
+                {vod.thumbnail_url ? (
+                  <img
+                    src={
+                      vod.thumbnail_url.startsWith("/")
+                        ? `${process.env.NEXT_PUBLIC_API_URL || "/api"}${vod.thumbnail_url}`
+                        : vod.thumbnail_url
+                    }
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="grid h-full place-items-center text-slate-300">
+                    <Film size={36} />
+                  </div>
+                )}
+                <span
+                  className={`absolute end-3 top-3 rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${platformClass(vod.platform)}`}
+                >
+                  {vod.platform}
+                </span>
+                <span className="absolute start-3 top-3 rounded-full bg-slate-950/85 px-2.5 py-1 text-[10px] font-black text-white backdrop-blur">
+                  {vodQualityText(vod)}
+                </span>
+              </div>
+              <div className="p-4">
+                <h3 className="truncate font-black">
+                  {vod.title || (ar ? "بث غير مسمّى" : "Untitled broadcast")}
+                </h3>
+                <p className="mt-1 truncate text-xs text-slate-500">
+                  {vod.streamer_name || "—"}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-3 text-xs font-bold text-slate-500">
+                  <span>{vodDuration(vod.duration_seconds)}</span>
+                  <span>{fileSize(vod.file_size)}</span>
+                  <span>{bitrateText(vod.bitrate)}</span>
+                </div>
+                {vod.status === "failed" ? (
+                  <p className="mt-3 text-xs font-bold text-rose-600">
+                    {vod.error || (ar ? "فشل الاستيراد" : "Import failed")}
+                  </p>
+                ) : vod.status === "ready" ? (
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder={ar ? "من ثانية" : "Start second"}
+                      value={editorRanges[vod.id]?.start || ""}
+                      onChange={(event) =>
+                        setEditorRanges({
+                          ...editorRanges,
+                          [vod.id]: {
+                            start: event.target.value,
+                            end: editorRanges[vod.id]?.end || "",
+                          },
+                        })
+                      }
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-xs"
+                    />
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder={ar ? "إلى ثانية" : "End second"}
+                      value={editorRanges[vod.id]?.end || ""}
+                      onChange={(event) =>
+                        setEditorRanges({
+                          ...editorRanges,
+                          [vod.id]: {
+                            start: editorRanges[vod.id]?.start || "0",
+                            end: event.target.value,
+                          },
+                        })
+                      }
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-xs"
+                    />
+                    <button
+                      onClick={() => startEditorialRange(vod)}
+                      disabled={studioBusy}
+                      className="col-span-2 rounded-lg bg-slate-900 px-3 py-2 text-xs font-black text-white disabled:opacity-50"
+                    >
+                      {ar
+                        ? "اعتماد وحفظ مع المقدمة والخاتمة"
+                        : "Save with intro & outro"}
+                    </button>
+                    <button
+                      onClick={() => generateVodClips(vod)}
+                      disabled={vodBusy}
+                      className="col-span-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:opacity-50"
+                    >
+                      {ar ? "إرسال لصناعة الشورتات" : "Send to Shorts"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setMetadataVodId(vod.id);
+                        setAiMetadata(null);
+                        changeSection("metadata");
+                      }}
+                      className="rounded-lg border border-emerald-200 px-3 py-2 text-xs font-black text-emerald-700"
+                    >
+                      {ar ? "عنوان ووصف" : "Title & description"}
+                    </button>
+                    <a
+                      href={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${vod.download_url || ""}`}
+                      download
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-center text-xs font-black text-slate-700"
+                    >
+                      {ar ? "تنزيل" : "Download"}
+                    </a>
+                    <button
+                      onClick={() => removeVod(vod.id)}
+                      className="col-span-2 rounded-lg px-3 py-2 text-xs font-black text-rose-600 hover:bg-rose-50"
+                    >
+                      {ar ? "حذف" : "Delete"}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="mt-3 text-xs font-bold text-slate-400">
+                    {ar ? "قيد المعالجة…" : "Processing…"}
+                  </p>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
     </>
   );
 
   const aiMetadataView = (
     <>
-      <SectionTitle icon={MessageSquareText} eyebrow="AI METADATA" title={ar ? "صناعة العنوان والوصف بالذكاء الاصطناعي" : "AI Titles & Description"} description={ar ? "يكتب من أحداث البث والكلام الفعلي فقط: عناوين عالية الجذب ووصف SEO وفصول وهاشتاقات قابلة للنسخ." : "Creates high-CTR titles, SEO description, chapters and hashtags from actual VOD events and speech."} />
+      <SectionTitle
+        icon={MessageSquareText}
+        eyebrow="AI METADATA"
+        title={
+          ar
+            ? "صناعة العنوان والوصف بالذكاء الاصطناعي"
+            : "AI Titles & Description"
+        }
+        description={
+          ar
+            ? "يكتب من أحداث البث والكلام الفعلي فقط: عناوين عالية الجذب ووصف SEO وفصول وهاشتاقات قابلة للنسخ."
+            : "Creates high-CTR titles, SEO description, chapters and hashtags from actual VOD events and speech."
+        }
+      />
       <section className="rounded-3xl border border-slate-800 bg-slate-950 p-6 text-white shadow-xl">
         <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
-          <select value={metadataVodId} onChange={(event) => { setMetadataVodId(event.target.value); setAiMetadata(null); }} className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm font-bold outline-none focus:border-emerald-500">
-            <option value="">{ar ? "اختر بثاً جاهزاً من المكتبة" : "Choose a ready VOD"}</option>
-            {vods.filter((vod) => vod.status === "ready").map((vod) => <option key={vod.id} value={vod.id}>{vod.title || (ar ? "بث غير مسمى" : "Untitled VOD")}</option>)}
+          <select
+            value={metadataVodId}
+            onChange={(event) => {
+              setMetadataVodId(event.target.value);
+              setAiMetadata(null);
+            }}
+            className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm font-bold outline-none focus:border-emerald-500"
+          >
+            <option value="">
+              {ar ? "اختر بثاً جاهزاً من المكتبة" : "Choose a ready VOD"}
+            </option>
+            {vods
+              .filter((vod) => vod.status === "ready")
+              .map((vod) => (
+                <option key={vod.id} value={vod.id}>
+                  {vod.title || (ar ? "بث غير مسمى" : "Untitled VOD")}
+                </option>
+              ))}
           </select>
-          <button onClick={() => generateMetadata(Boolean(aiMetadata))} disabled={!metadataVodId || metadataBusy} className="rounded-xl bg-emerald-500 px-5 py-3 text-sm font-black text-slate-950 disabled:opacity-50">{metadataBusy ? (ar ? "جارٍ التحليل…" : "Analyzing…") : aiMetadata ? (ar ? "توليد صياغة مختلفة" : "Generate another version") : (ar ? "تحليل البث وتوليد المحتوى" : "Analyze & generate")}</button>
+          <button
+            onClick={() => generateMetadata(Boolean(aiMetadata))}
+            disabled={!metadataVodId || metadataBusy}
+            className="rounded-xl bg-emerald-500 px-5 py-3 text-sm font-black text-slate-950 disabled:opacity-50"
+          >
+            {metadataBusy
+              ? ar
+                ? "جارٍ التحليل…"
+                : "Analyzing…"
+              : aiMetadata
+                ? ar
+                  ? "توليد صياغة مختلفة"
+                  : "Generate another version"
+                : ar
+                  ? "تحليل البث وتوليد المحتوى"
+                  : "Analyze & generate"}
+          </button>
         </div>
-        <p className="mt-3 text-xs text-slate-400">{ar ? "يلزم تحليل أحداث البث أولاً؛ لن ينشئ محتوى اعتماداً على عنوان البث وحده." : "Event analysis is required first; it never writes from the VOD title alone."}</p>
+        <p className="mt-3 text-xs text-slate-400">
+          {ar
+            ? "يلزم تحليل أحداث البث أولاً؛ لن ينشئ محتوى اعتماداً على عنوان البث وحده."
+            : "Event analysis is required first; it never writes from the VOD title alone."}
+        </p>
       </section>
-      {aiMetadata && <div className="mt-6 grid gap-5 xl:grid-cols-2">
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-center justify-between"><h2 className="font-black">{ar ? "5 عناوين عالية الجذب" : "5 high-CTR titles"}</h2><button onClick={() => copyText(aiMetadata.titles.map((item) => item.text).join("\n"))} className="text-xs font-black text-emerald-700">{ar ? "نسخ الكل" : "Copy all"}</button></div><div className="mt-4 space-y-3">{aiMetadata.titles.map((item, index) => <button key={`${item.text}-${index}`} onClick={() => copyText(item.text)} className="flex w-full items-start justify-between gap-3 rounded-xl bg-slate-50 p-3 text-start"><span className="text-sm font-bold">{item.text}</span><span className="shrink-0 rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-black text-emerald-700">{item.score}%</span></button>)}</div></section>
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-center justify-between"><h2 className="font-black">{ar ? "وصف SEO احترافي" : "SEO description"}</h2><button onClick={() => copyText(aiMetadata.description)} className="text-xs font-black text-emerald-700">{ar ? "نسخ" : "Copy"}</button></div><p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-600">{aiMetadata.description}</p></section>
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-center justify-between"><h2 className="font-black">{ar ? "فصول البث" : "Chapters"}</h2><button onClick={() => copyText(aiMetadata.chapters.map((item) => `${item.time} ${item.title}`).join("\n"))} className="text-xs font-black text-emerald-700">{ar ? "نسخ" : "Copy"}</button></div><div className="mt-4 space-y-2">{aiMetadata.chapters.map((item, index) => <div key={`${item.time}-${index}`} className="flex gap-3 rounded-lg bg-slate-50 px-3 py-2 text-sm"><span className="font-black text-emerald-700">{item.time}</span><span>{item.title}</span></div>)}</div></section>
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-center justify-between"><h2 className="font-black">{ar ? "الكلمات والهاشتاقات" : "Tags & hashtags"}</h2><button onClick={() => copyText([...aiMetadata.tags, ...aiMetadata.hashtags].join(" "))} className="text-xs font-black text-emerald-700">{ar ? "نسخ الكل" : "Copy all"}</button></div><div className="mt-4 flex flex-wrap gap-2">{[...aiMetadata.tags, ...aiMetadata.hashtags].map((item, index) => <span key={`${item}-${index}`} className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800">{item}</span>)}</div></section>
-      </div>}
+      {aiMetadata && (
+        <div className="mt-6 grid gap-5 xl:grid-cols-2">
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h2 className="font-black">
+                {ar ? "5 عناوين عالية الجذب" : "5 high-CTR titles"}
+              </h2>
+              <button
+                onClick={() =>
+                  copyText(
+                    aiMetadata.titles.map((item) => item.text).join("\n"),
+                  )
+                }
+                className="text-xs font-black text-emerald-700"
+              >
+                {ar ? "نسخ الكل" : "Copy all"}
+              </button>
+            </div>
+            <div className="mt-4 space-y-3">
+              {aiMetadata.titles.map((item, index) => (
+                <button
+                  key={`${item.text}-${index}`}
+                  onClick={() => copyText(item.text)}
+                  className="flex w-full items-start justify-between gap-3 rounded-xl bg-slate-50 p-3 text-start"
+                >
+                  <span className="text-sm font-bold">{item.text}</span>
+                  <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-black text-emerald-700">
+                    {item.score}%
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h2 className="font-black">
+                {ar ? "وصف SEO احترافي" : "SEO description"}
+              </h2>
+              <button
+                onClick={() => copyText(aiMetadata.description)}
+                className="text-xs font-black text-emerald-700"
+              >
+                {ar ? "نسخ" : "Copy"}
+              </button>
+            </div>
+            <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-600">
+              {aiMetadata.description}
+            </p>
+          </section>
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h2 className="font-black">{ar ? "فصول البث" : "Chapters"}</h2>
+              <button
+                onClick={() =>
+                  copyText(
+                    aiMetadata.chapters
+                      .map((item) => `${item.time} ${item.title}`)
+                      .join("\n"),
+                  )
+                }
+                className="text-xs font-black text-emerald-700"
+              >
+                {ar ? "نسخ" : "Copy"}
+              </button>
+            </div>
+            <div className="mt-4 space-y-2">
+              {aiMetadata.chapters.map((item, index) => (
+                <div
+                  key={`${item.time}-${index}`}
+                  className="flex gap-3 rounded-lg bg-slate-50 px-3 py-2 text-sm"
+                >
+                  <span className="font-black text-emerald-700">
+                    {item.time}
+                  </span>
+                  <span>{item.title}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h2 className="font-black">
+                {ar ? "الكلمات والهاشتاقات" : "Tags & hashtags"}
+              </h2>
+              <button
+                onClick={() =>
+                  copyText(
+                    [...aiMetadata.tags, ...aiMetadata.hashtags].join(" "),
+                  )
+                }
+                className="text-xs font-black text-emerald-700"
+              >
+                {ar ? "نسخ الكل" : "Copy all"}
+              </button>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {[...aiMetadata.tags, ...aiMetadata.hashtags].map(
+                (item, index) => (
+                  <span
+                    key={`${item}-${index}`}
+                    className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800"
+                  >
+                    {item}
+                  </span>
+                ),
+              )}
+            </div>
+          </section>
+        </div>
+      )}
     </>
   );
 
@@ -2428,7 +3414,11 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
       <SectionTitle
         eyebrow={ar ? "خزنة مشفّرة" : "Encrypted vault"}
         title={ar ? "الجلسة" : "Session Vault"}
-        description={ar ? "اربط جلسات Kick وTwitch محلياً لتسجيل المصدر بأفضل جودة. لا تظهر الكوكيز أو الرموز بعد حفظها." : "Store Kick and Twitch sessions locally for best-source capture. Cookies and tokens are never shown after saving."}
+        description={
+          ar
+            ? "اربط جلسات Kick وTwitch محلياً لتسجيل المصدر بأفضل جودة. لا تظهر الكوكيز أو الرموز بعد حفظها."
+            : "Store Kick and Twitch sessions locally for best-source capture. Cookies and tokens are never shown after saving."
+        }
         icon={KeyRound}
       />
       <div className="grid gap-5 xl:grid-cols-2">
@@ -2436,71 +3426,423 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
           const item = credentials[platform];
           const expired = item.status === "expired";
           const active = item.status === "active";
-          const date = (value: string | null) => value ? new Intl.DateTimeFormat(ar ? "ar-SA" : "en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "—";
+          const date = (value: string | null) =>
+            value
+              ? new Intl.DateTimeFormat(ar ? "ar-SA" : "en-US", {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                }).format(new Date(value))
+              : "—";
           const save = async () => {
             if (!sessionInput[platform].trim()) return;
             setSessionBusy(platform);
             try {
-              const next = await api.saveCredential(platform, sessionInput[platform]);
+              const next = await api.saveCredential(
+                platform,
+                sessionInput[platform],
+              );
               setCredentials((current) => ({ ...current, [platform]: next }));
               setSessionInput((current) => ({ ...current, [platform]: "" }));
-              setMessage(ar ? "تم حفظ وتشفير الجلسة." : "Session encrypted and saved.");
-            } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to save session"); }
-            finally { setSessionBusy(null); }
+              setMessage(
+                ar ? "تم حفظ وتشفير الجلسة." : "Session encrypted and saved.",
+              );
+            } catch (error) {
+              setMessage(
+                error instanceof Error
+                  ? error.message
+                  : "Unable to save session",
+              );
+            } finally {
+              setSessionBusy(null);
+            }
           };
           const removeSession = async () => {
             setSessionBusy(platform);
             try {
               await api.deleteCredential(platform);
-              setCredentials((current) => ({ ...current, [platform]: { ...emptyCredentials[platform], updated_at: new Date().toISOString() } }));
+              setCredentials((current) => ({
+                ...current,
+                [platform]: {
+                  ...emptyCredentials[platform],
+                  updated_at: new Date().toISOString(),
+                },
+              }));
               setSessionInput((current) => ({ ...current, [platform]: "" }));
-            } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to remove session"); }
-            finally { setSessionBusy(null); }
+            } catch (error) {
+              setMessage(
+                error instanceof Error
+                  ? error.message
+                  : "Unable to remove session",
+              );
+            } finally {
+              setSessionBusy(null);
+            }
           };
-          return <section key={platform} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex items-start justify-between gap-3">
-              <div><p className="text-xs font-black uppercase tracking-[.16em] text-emerald-600">{platform === "kick" ? "Kick 1080p60 Session" : "Twitch 1080p60 & Ad-Free Session"}</p>
-                <h2 className="mt-1 text-xl font-black">{active ? (ar ? "متصل • جودة 1080p60 مفعّلة" : "Connected • 1080p60 enabled") : expired ? (ar ? "منتهية الصلاحية — يلزم التجديد" : "Expired — renew required") : (ar ? "غير مربوط" : "Not connected")}</h2></div>
-              <span className={`mt-1 size-3 rounded-full ${active ? "bg-emerald-500" : expired ? "bg-amber-500" : "bg-slate-300"}`} aria-label={item.status} />
-            </div>
-            <div className="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-3 text-xs"><div><p className="text-slate-400">{ar ? "آخر تحديث" : "Last updated"}</p><b>{date(item.updated_at)}</b></div><div><p className="text-slate-400">{ar ? "انتهاء الكوكيز" : "Cookie expiry"}</p><b>{date(item.expires_at)}</b></div></div>
-            <div className="mt-5 rounded-xl border border-emerald-100 bg-emerald-50/50 p-4 text-xs leading-6 text-slate-600"><b className="text-emerald-800">{ar ? "دليل سريع (15 ثانية)" : "Quick guide (15 seconds)"}</b><ol className="mt-1 list-decimal ps-5"><li>{ar ? "افتح جلسة ثانوية مسجّل الدخول في المتصفح." : "Open a secondary signed-in browser session."}</li><li>{ar ? "انسخ cookies.txt بصيغة Netscape أو session_token." : "Copy Netscape cookies.txt or a session token."}</li><li>{ar ? "الصقه هنا ثم احفظه مشفراً." : "Paste it here and save encrypted."}</li></ol></div>
-            {platform === "twitch" && <p className="mt-4 rounded-xl bg-violet-50 p-3 text-xs font-bold leading-5 text-violet-800">اربط جلسة حساب Twitch Turbo لضمان تسجيل خام 1080p60 بدون أي إعلانات أو انقطاع أثناء اللقطات القوية.</p>}
-            <label className="mt-5 block text-xs font-black text-slate-700">{ar ? "كوكيز أو رمز الجلسة" : "Cookies or session token"}<textarea value={sessionInput[platform]} onChange={(event) => setSessionInput((current) => ({ ...current, [platform]: event.target.value }))} maxLength={65536} rows={5} className={inputClass} placeholder={platform === "kick" ? "cookies.txt أو kick_session" : "cookies.txt أو Bearer token"} /></label>
-            <label className="mt-3 inline-flex cursor-pointer items-center gap-2 text-xs font-bold text-emerald-700"><Upload size={15}/>{ar ? "تحميل ملف .txt" : "Load .txt file"}<input className="hidden" type="file" accept=".txt,text/plain" onChange={async (event) => { const file = event.target.files?.[0]; if (file) { const content = await file.text(); setSessionInput((current) => ({ ...current, [platform]: content.slice(0, 65536) })); } event.currentTarget.value = ""; }} /></label>
-            <div className="mt-5 flex flex-wrap gap-3"><button disabled={sessionBusy === platform || !sessionInput[platform].trim()} onClick={save} className="rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-black text-white disabled:opacity-50">{ar ? "حفظ وتشفير الجلسة" : "Save encrypted session"}</button><button disabled={sessionBusy === platform || !item.has_session} onClick={removeSession} className="rounded-xl border border-rose-300 px-4 py-2.5 text-xs font-black text-rose-600 disabled:opacity-50">{ar ? "حذف الجلسة" : "Delete session"}</button></div>
-          </section>;
+          return (
+            <section
+              key={platform}
+              className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[.16em] text-emerald-600">
+                    {platform === "kick"
+                      ? "Kick 1080p60 Session"
+                      : "Twitch 1080p60 & Ad-Free Session"}
+                  </p>
+                  <h2 className="mt-1 text-xl font-black">
+                    {active
+                      ? ar
+                        ? "متصل • جودة 1080p60 مفعّلة"
+                        : "Connected • 1080p60 enabled"
+                      : expired
+                        ? ar
+                          ? "منتهية الصلاحية — يلزم التجديد"
+                          : "Expired — renew required"
+                        : ar
+                          ? "غير مربوط"
+                          : "Not connected"}
+                  </h2>
+                </div>
+                <span
+                  className={`mt-1 size-3 rounded-full ${active ? "bg-emerald-500" : expired ? "bg-amber-500" : "bg-slate-300"}`}
+                  aria-label={item.status}
+                />
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-3 text-xs">
+                <div>
+                  <p className="text-slate-400">
+                    {ar ? "آخر تحديث" : "Last updated"}
+                  </p>
+                  <b>{date(item.updated_at)}</b>
+                </div>
+                <div>
+                  <p className="text-slate-400">
+                    {ar ? "انتهاء الكوكيز" : "Cookie expiry"}
+                  </p>
+                  <b>{date(item.expires_at)}</b>
+                </div>
+              </div>
+              <div className="mt-5 rounded-xl border border-emerald-100 bg-emerald-50/50 p-4 text-xs leading-6 text-slate-600">
+                <b className="text-emerald-800">
+                  {ar ? "دليل سريع (15 ثانية)" : "Quick guide (15 seconds)"}
+                </b>
+                <ol className="mt-1 list-decimal ps-5">
+                  <li>
+                    {ar
+                      ? "افتح جلسة ثانوية مسجّل الدخول في المتصفح."
+                      : "Open a secondary signed-in browser session."}
+                  </li>
+                  <li>
+                    {ar
+                      ? "انسخ cookies.txt بصيغة Netscape أو session_token."
+                      : "Copy Netscape cookies.txt or a session token."}
+                  </li>
+                  <li>
+                    {ar
+                      ? "الصقه هنا ثم احفظه مشفراً."
+                      : "Paste it here and save encrypted."}
+                  </li>
+                </ol>
+              </div>
+              {platform === "twitch" && (
+                <p className="mt-4 rounded-xl bg-violet-50 p-3 text-xs font-bold leading-5 text-violet-800">
+                  اربط جلسة حساب Twitch Turbo لضمان تسجيل خام 1080p60 بدون أي
+                  إعلانات أو انقطاع أثناء اللقطات القوية.
+                </p>
+              )}
+              <label className="mt-5 block text-xs font-black text-slate-700">
+                {ar ? "كوكيز أو رمز الجلسة" : "Cookies or session token"}
+                <textarea
+                  value={sessionInput[platform]}
+                  onChange={(event) =>
+                    setSessionInput((current) => ({
+                      ...current,
+                      [platform]: event.target.value,
+                    }))
+                  }
+                  maxLength={65536}
+                  rows={5}
+                  className={inputClass}
+                  placeholder={
+                    platform === "kick"
+                      ? "cookies.txt أو kick_session"
+                      : "cookies.txt أو Bearer token"
+                  }
+                />
+              </label>
+              <label className="mt-3 inline-flex cursor-pointer items-center gap-2 text-xs font-bold text-emerald-700">
+                <Upload size={15} />
+                {ar ? "تحميل ملف .txt" : "Load .txt file"}
+                <input
+                  className="hidden"
+                  type="file"
+                  accept=".txt,text/plain"
+                  onChange={async (event) => {
+                    const file = event.target.files?.[0];
+                    if (file) {
+                      const content = await file.text();
+                      setSessionInput((current) => ({
+                        ...current,
+                        [platform]: content.slice(0, 65536),
+                      }));
+                    }
+                    event.currentTarget.value = "";
+                  }}
+                />
+              </label>
+              <div className="mt-5 flex flex-wrap gap-3">
+                <button
+                  disabled={
+                    sessionBusy === platform || !sessionInput[platform].trim()
+                  }
+                  onClick={save}
+                  className="rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-black text-white disabled:opacity-50"
+                >
+                  {ar ? "حفظ وتشفير الجلسة" : "Save encrypted session"}
+                </button>
+                <button
+                  disabled={sessionBusy === platform || !item.has_session}
+                  onClick={removeSession}
+                  className="rounded-xl border border-rose-300 px-4 py-2.5 text-xs font-black text-rose-600 disabled:opacity-50"
+                >
+                  {ar ? "حذف الجلسة" : "Delete session"}
+                </button>
+              </div>
+            </section>
+          );
         })}
       </div>
     </>
   );
-  const hasExpiredSession = Object.values(credentials).some((item) => item.status === "expired");
+  const hasExpiredSession = Object.values(credentials).some(
+    (item) => item.status === "expired",
+  );
   const presetsView = (
     <>
-      <SectionTitle icon={CheckCircle2} eyebrow={ar ? "هوية القناة" : "CHANNEL IDENTITY"} title={ar ? "الشعار والبنر" : "Logo & YouTube banner"} description={ar ? "احفظ هوية موحّدة: شعار أسود بإطار أخضر وبنر يوتيوب باسم القناة." : "Save a unified black-and-emerald logo card and YouTube channel banner."} />
+      <SectionTitle
+        icon={CheckCircle2}
+        eyebrow={ar ? "هوية القناة" : "CHANNEL IDENTITY"}
+        title={ar ? "الشعار والبنر" : "Logo & YouTube banner"}
+        description={
+          ar
+            ? "احفظ هوية موحّدة: شعار أسود بإطار أخضر وبنر يوتيوب باسم القناة."
+            : "Save a unified black-and-emerald logo card and YouTube channel banner."
+        }
+      />
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <section className="space-y-6 rounded-3xl border border-emerald-100 bg-white p-6 shadow-sm">
-          <div><div className="mb-3 flex items-center justify-between"><b>{ar ? "صورة القناة · YouTube" : "YouTube channel avatar"}</b><a href={drb7hLogo} download className="text-xs font-black text-emerald-700">{ar ? "تنزيل الشعار" : "Download logo"}</a></div>
-            <div className="relative mx-auto grid aspect-video max-w-3xl place-items-center overflow-hidden rounded-2xl border-[10px] border-emerald-500 bg-black shadow-[0_0_40px_rgba(16,185,129,.25)]"><div className="grid size-72 place-items-center rounded-full border-[7px] border-emerald-500 bg-black p-3 shadow-[0_0_28px_rgba(16,185,129,.42)] sm:size-80"><div className="flex w-full flex-col items-center"><div className="grid size-52 place-items-center overflow-hidden bg-transparent sm:size-56"><img src={drb7hLogo} alt="Drb7h channel logo" className="h-full w-full object-contain" /></div><p className="mt-2 max-w-full truncate text-center text-2xl font-black tracking-[-.03em] text-white drop-shadow-lg sm:text-3xl">{branding.overlay_creator_name || "Drb7h"}</p></div></div></div>
+          <div>
+            <div className="mb-3 flex items-center justify-between">
+              <b>{ar ? "صورة القناة · YouTube" : "YouTube channel avatar"}</b>
+              <a
+                href={drb7hLogo}
+                download
+                className="text-xs font-black text-emerald-700"
+              >
+                {ar ? "تنزيل الشعار" : "Download logo"}
+              </a>
+            </div>
+            <div className="relative mx-auto grid aspect-video max-w-3xl place-items-center overflow-hidden rounded-2xl border-[10px] border-emerald-500 bg-black shadow-[0_0_40px_rgba(16,185,129,.25)]">
+              <div className="grid size-72 place-items-center rounded-full border-[7px] border-emerald-500 bg-black p-3 shadow-[0_0_28px_rgba(16,185,129,.42)] sm:size-80">
+                <div className="flex w-full flex-col items-center">
+                  <div className="grid size-52 place-items-center overflow-hidden bg-transparent sm:size-56">
+                    <img
+                      src={drb7hLogo}
+                      alt="Drb7h channel logo"
+                      className="h-full w-full object-contain"
+                    />
+                  </div>
+                  <p className="mt-2 max-w-full truncate text-center text-2xl font-black tracking-[-.03em] text-white drop-shadow-lg sm:text-3xl">
+                    {branding.overlay_creator_name || "Drb7h"}
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
-          <div><div className="mb-3 flex items-center justify-between"><b>{ar ? "بنر يوتيوب" : "YouTube banner"}</b><div className="flex items-center gap-3"><span className="text-xs text-slate-500">2560 × 1440</span><a href={drb7hBanner} download className="text-xs font-black text-emerald-700">{ar ? "تنزيل البنر" : "Download banner"}</a></div></div>
-            <div className="relative mx-auto aspect-[16/9] max-w-3xl overflow-hidden rounded-2xl border border-emerald-500 bg-slate-950 shadow-xl"><img src={drb7hBanner} alt="Drb7h YouTube channel banner" className="h-full w-full object-contain" /></div>
+          <div>
+            <div className="mb-3 flex items-center justify-between">
+              <b>{ar ? "بنر يوتيوب" : "YouTube banner"}</b>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-500">2560 × 1440</span>
+                <a
+                  href={drb7hBanner}
+                  download
+                  className="text-xs font-black text-emerald-700"
+                >
+                  {ar ? "تنزيل البنر" : "Download banner"}
+                </a>
+              </div>
+            </div>
+            <div className="relative mx-auto aspect-[16/9] max-w-3xl overflow-hidden rounded-2xl border border-emerald-500 bg-slate-950 shadow-xl">
+              <img
+                src={drb7hBanner}
+                alt="Drb7h YouTube channel banner"
+                className="h-full w-full object-contain"
+              />
+            </div>
           </div>
         </section>
         <aside className="space-y-5 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <label className="block text-sm font-black">{ar ? "اسم المشهور / الستريمر" : "Creator / streamer name"}<input value={branding.overlay_creator_name || ""} onChange={(event) => setBranding({ ...branding, overlay_creator_name: event.target.value })} maxLength={120} placeholder="@drb7h" className={inputClass} /></label>
-          <div><p className="text-sm font-black">{ar ? "الشعار" : "Logo"}</p><div className="mt-3 flex gap-2"><label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-300 px-3 py-2.5 text-xs font-black"><Upload size={15}/>{ar ? "رفع / تغيير" : "Upload / change"}<input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => uploadOverlayLogo(event.target.files?.[0])}/></label>{branding.overlay_logo_key && <button onClick={deleteOverlayLogo} className="rounded-xl px-3 text-xs font-black text-rose-600">{ar ? "إزالة" : "Remove"}</button>}</div><p className="mt-2 text-[11px] text-slate-400">PNG / JPG / WebP · 5MB</p></div>
-          <label className="block text-sm font-black">{ar ? "موقع الختم" : "Overlay position"}<select value={branding.overlay_position} onChange={(event) => setBranding({ ...branding, overlay_position: event.target.value as Branding["overlay_position"] })} className={inputClass}><option value="top-right">{ar ? "أعلى اليمين" : "Top right"}</option><option value="top-left">{ar ? "أعلى اليسار" : "Top left"}</option><option value="bottom-center">{ar ? "أسفل المنتصف" : "Bottom center"}</option></select></label>
-          <button onClick={saveBranding} disabled={savingBrand} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3.5 font-black text-white disabled:opacity-50"><Check size={17}/>{savingBrand ? (ar ? "جارٍ الحفظ…" : "Saving…") : (ar ? "حفظ المحفوظات التعديلية" : "Save editing preset")}</button>
-          <p className="rounded-xl bg-emerald-50 p-3 text-xs leading-5 text-emerald-800">{ar ? "سيُلتقط هذا الإعداد مع كل بث جديد ويُدمج تلقائياً في التصدير النهائي." : "This preset is snapshotted with each new stream and burned into its final export."}</p>
+          <label className="block text-sm font-black">
+            {ar ? "اسم المشهور / الستريمر" : "Creator / streamer name"}
+            <input
+              value={branding.overlay_creator_name || ""}
+              onChange={(event) =>
+                setBranding({
+                  ...branding,
+                  overlay_creator_name: event.target.value,
+                })
+              }
+              maxLength={120}
+              placeholder="@drb7h"
+              className={inputClass}
+            />
+          </label>
+          <div>
+            <p className="text-sm font-black">{ar ? "الشعار" : "Logo"}</p>
+            <div className="mt-3 flex gap-2">
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-300 px-3 py-2.5 text-xs font-black">
+                <Upload size={15} />
+                {ar ? "رفع / تغيير" : "Upload / change"}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={(event) =>
+                    uploadOverlayLogo(event.target.files?.[0])
+                  }
+                />
+              </label>
+              {branding.overlay_logo_key && (
+                <button
+                  onClick={deleteOverlayLogo}
+                  className="rounded-xl px-3 text-xs font-black text-rose-600"
+                >
+                  {ar ? "إزالة" : "Remove"}
+                </button>
+              )}
+            </div>
+            <p className="mt-2 text-[11px] text-slate-400">
+              PNG / JPG / WebP · 5MB
+            </p>
+          </div>
+          <label className="block text-sm font-black">
+            {ar ? "موقع الختم" : "Overlay position"}
+            <select
+              value={branding.overlay_position}
+              onChange={(event) =>
+                setBranding({
+                  ...branding,
+                  overlay_position: event.target
+                    .value as Branding["overlay_position"],
+                })
+              }
+              className={inputClass}
+            >
+              <option value="top-right">
+                {ar ? "أعلى اليمين" : "Top right"}
+              </option>
+              <option value="top-left">
+                {ar ? "أعلى اليسار" : "Top left"}
+              </option>
+              <option value="bottom-center">
+                {ar ? "أسفل المنتصف" : "Bottom center"}
+              </option>
+            </select>
+          </label>
+          <button
+            onClick={saveBranding}
+            disabled={savingBrand}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3.5 font-black text-white disabled:opacity-50"
+          >
+            <Check size={17} />
+            {savingBrand
+              ? ar
+                ? "جارٍ الحفظ…"
+                : "Saving…"
+              : ar
+                ? "حفظ المحفوظات التعديلية"
+                : "Save editing preset"}
+          </button>
+          <p className="rounded-xl bg-emerald-50 p-3 text-xs leading-5 text-emerald-800">
+            {ar
+              ? "سيُلتقط هذا الإعداد مع كل بث جديد ويُدمج تلقائياً في التصدير النهائي."
+              : "This preset is snapshotted with each new stream and burned into its final export."}
+          </p>
         </aside>
       </div>
     </>
   );
   const settingsView = (
     <>
-      <SectionTitle icon={KeyRound} eyebrow={ar ? "الهوية والإعدادات" : "SETTINGS & BRANDING"} title={ar ? "الإعدادات والهوية" : "Settings & Branding"} description={ar ? "اعتمد هوية القناة وقوالب البداية والنهاية، ثم أدر جلسات المنصات بأمان." : "Set channel identity, intro/outro templates, and platform sessions in one place."} />
-      <div className="mb-6 grid gap-3 sm:grid-cols-3"><button onClick={() => setBranding({ ...branding, auto_merge_branding: !branding.auto_merge_branding })} className={`rounded-2xl border p-4 text-start ${branding.auto_merge_branding ? "border-emerald-300 bg-emerald-50" : "border-slate-200 bg-white"}`}><b className="block text-sm text-emerald-900">{ar ? "مقدمة 5 ث + خاتمة 8 ث" : "5s intro + 8s outro"}</b><span className="mt-1 block text-xs text-emerald-700">{branding.auto_merge_branding ? (ar ? "مفعّل تلقائياً عند السحب" : "Enabled for every import") : (ar ? "غير مفعّل" : "Disabled")}</span></button><button onClick={() => setBranding({ ...branding, ai_music_removal: !branding.ai_music_removal })} className={`rounded-2xl border p-4 text-start ${branding.ai_music_removal ? "border-emerald-300 bg-emerald-50" : "border-slate-200 bg-white"}`}><b className="block text-sm text-emerald-900">{ar ? "إزالة الموسيقى بالذكاء" : "AI music removal"}</b><span className="mt-1 block text-xs text-emerald-700">{branding.ai_music_removal ? (ar ? "Demucs + فلترة صوت" : "Demucs + vocal cleanup") : (ar ? "اضغط للتفعيل" : "Click to enable")}</span></button><button onClick={() => changeSection("sessions")} className="rounded-2xl border border-slate-200 bg-white p-4 text-start shadow-sm transition hover:border-emerald-300"><b className="block text-sm">{ar ? "جلسات المنصات" : "Platform sessions"}</b><span className="mt-1 block text-xs text-slate-500">Kick و Twitch</span></button></div>
+      <SectionTitle
+        icon={KeyRound}
+        eyebrow={ar ? "الهوية والإعدادات" : "SETTINGS & BRANDING"}
+        title={ar ? "الإعدادات والهوية" : "Settings & Branding"}
+        description={
+          ar
+            ? "اعتمد هوية القناة وقوالب البداية والنهاية، ثم أدر جلسات المنصات بأمان."
+            : "Set channel identity, intro/outro templates, and platform sessions in one place."
+        }
+      />
+      <div className="mb-6 grid gap-3 sm:grid-cols-3">
+        <button
+          onClick={() =>
+            setBranding({
+              ...branding,
+              auto_merge_branding: !branding.auto_merge_branding,
+            })
+          }
+          className={`rounded-2xl border p-4 text-start ${branding.auto_merge_branding ? "border-emerald-300 bg-emerald-50" : "border-slate-200 bg-white"}`}
+        >
+          <b className="block text-sm text-emerald-900">
+            {ar ? "مقدمة 5 ث + خاتمة 8 ث" : "5s intro + 8s outro"}
+          </b>
+          <span className="mt-1 block text-xs text-emerald-700">
+            {branding.auto_merge_branding
+              ? ar
+                ? "مفعّل تلقائياً عند السحب"
+                : "Enabled for every import"
+              : ar
+                ? "غير مفعّل"
+                : "Disabled"}
+          </span>
+        </button>
+        <button
+          onClick={() =>
+            setBranding({
+              ...branding,
+              ai_music_removal: !branding.ai_music_removal,
+            })
+          }
+          className={`rounded-2xl border p-4 text-start ${branding.ai_music_removal ? "border-emerald-300 bg-emerald-50" : "border-slate-200 bg-white"}`}
+        >
+          <b className="block text-sm text-emerald-900">
+            {ar ? "إزالة الموسيقى بالذكاء" : "AI music removal"}
+          </b>
+          <span className="mt-1 block text-xs text-emerald-700">
+            {branding.ai_music_removal
+              ? ar
+                ? "Demucs + فلترة صوت"
+                : "Demucs + vocal cleanup"
+              : ar
+                ? "اضغط للتفعيل"
+                : "Click to enable"}
+          </span>
+        </button>
+        <button
+          onClick={() => changeSection("sessions")}
+          className="rounded-2xl border border-slate-200 bg-white p-4 text-start shadow-sm transition hover:border-emerald-300"
+        >
+          <b className="block text-sm">
+            {ar ? "جلسات المنصات" : "Platform sessions"}
+          </b>
+          <span className="mt-1 block text-xs text-slate-500">
+            Kick و Twitch
+          </span>
+        </button>
+      </div>
       {presetsView}
     </>
   );
@@ -2509,21 +3851,23 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
       ? liveView
       : section === "vods"
         ? vodsView
-      : section === "shorts"
+        : section === "shorts"
           ? shortsView
           : section === "metadata"
             ? aiMetadataView
             : section === "settings"
-                ? settingsView
-        : section === "presets"
-          ? presetsView
-        : section === "thumbnails"
-          ? thumbnailView
-        : section === "intro-outro"
-          ? brandingView
-        : section === "studio"
-          ? studioView
-        : section === "sessions" ? sessionView : suggestionsView;
+              ? settingsView
+              : section === "presets"
+                ? presetsView
+                : section === "thumbnails"
+                  ? thumbnailView
+                  : section === "intro-outro"
+                    ? brandingView
+                    : section === "studio"
+                      ? studioView
+                      : section === "sessions"
+                        ? sessionView
+                        : suggestionsView;
   return (
     <Shell
       activeCount={active.length}
@@ -2533,8 +3877,17 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
       <div className="mx-auto max-w-[1500px]">
         {hasExpiredSession && section !== "sessions" && (
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-900">
-            <span>{ar ? "انتهت صلاحية جلسة البث — جدّدها للاستمرار بجودة 1080p60." : "A stream session expired — renew it to continue 1080p60 capture."}</span>
-            <button onClick={() => changeSection("sessions")} className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-black text-white">{ar ? "تجديد الجلسة الآن" : "Renew session now"}</button>
+            <span>
+              {ar
+                ? "انتهت صلاحية جلسة البث — جدّدها للاستمرار بجودة 1080p60."
+                : "A stream session expired — renew it to continue 1080p60 capture."}
+            </span>
+            <button
+              onClick={() => changeSection("sessions")}
+              className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-black text-white"
+            >
+              {ar ? "تجديد الجلسة الآن" : "Renew session now"}
+            </button>
           </div>
         )}
         {message && (
@@ -2591,10 +3944,34 @@ function ClapperboardIcon(props: React.ComponentProps<typeof Film>) {
   return <Film {...props} />;
 }
 
-function AssetPicker({ label, accept, file, onChange, hint }: { label: string; accept: string; file: File | null; onChange: (file: File | null) => void; hint: string }) {
-  return <label className="block rounded-xl border border-dashed border-slate-300 p-4 text-sm font-black transition hover:border-emerald-400 hover:bg-emerald-50">
-    <span className="flex items-center gap-2"><Upload size={17} className="text-emerald-600"/>{label}</span>
-    <span className="mt-3 block truncate rounded-lg bg-slate-50 px-3 py-2 text-xs font-medium text-slate-500">{file?.name || hint}</span>
-    <input type="file" accept={accept} className="hidden" onChange={(event) => onChange(event.target.files?.[0] || null)} />
-  </label>;
+function AssetPicker({
+  label,
+  accept,
+  file,
+  onChange,
+  hint,
+}: {
+  label: string;
+  accept: string;
+  file: File | null;
+  onChange: (file: File | null) => void;
+  hint: string;
+}) {
+  return (
+    <label className="block rounded-xl border border-dashed border-slate-300 p-4 text-sm font-black transition hover:border-emerald-400 hover:bg-emerald-50">
+      <span className="flex items-center gap-2">
+        <Upload size={17} className="text-emerald-600" />
+        {label}
+      </span>
+      <span className="mt-3 block truncate rounded-lg bg-slate-50 px-3 py-2 text-xs font-medium text-slate-500">
+        {file?.name || hint}
+      </span>
+      <input
+        type="file"
+        accept={accept}
+        className="hidden"
+        onChange={(event) => onChange(event.target.files?.[0] || null)}
+      />
+    </label>
+  );
 }

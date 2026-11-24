@@ -8,8 +8,8 @@ from uuid import UUID
 from celery import shared_task
 
 from app.db import SessionLocal
-from app.models import StudioRender, Vod
-from app.storage import download_file
+from app.models import ArchiveBranding, StudioRender, Vod
+from app.storage import download_file, presigned_download_url
 from app.worker.tasks import WORK_ROOT
 
 
@@ -54,13 +54,25 @@ def render_studio(self, render_id: str) -> None:
             _update(rid, status="failed", error_message="The selected VOD is no longer available.")
             return
         intro, outro, export_quality = render.intro_path, render.outro_path, render.export_quality
+        start_seconds, end_seconds = render.start_seconds, render.end_seconds
+        branding = db.get(ArchiveBranding, 1)
     job_dir = WORK_ROOT / "studio" / str(rid)
     source = job_dir / "vod.mp4"
     output = job_dir / "final.mp4"
     try:
         _update(rid, status="processing", progress=5, error_message=None)
         job_dir.mkdir(parents=True, exist_ok=True)
-        download_file(vod.storage_key, source)
+        if not intro and branding and branding.default_intro_key:
+            intro_file = job_dir / "default-intro.mp4"; download_file(branding.default_intro_key, intro_file); intro = str(intro_file)
+        if not outro and branding and branding.default_outro_key:
+            outro_file = job_dir / "default-outro.mp4"; download_file(branding.default_outro_key, outro_file); outro = str(outro_file)
+        source_url = presigned_download_url(vod.storage_key)
+        trim_command = ["ffmpeg", "-y"]
+        if start_seconds is not None: trim_command += ["-ss", str(start_seconds)]
+        trim_command += ["-i", source_url]
+        if end_seconds is not None: trim_command += ["-t", str(end_seconds - (start_seconds or 0))]
+        trim_command += ["-map", "0:v:0", "-map", "0:a?", "-c", "copy", str(source)]
+        subprocess.run(trim_command, check=True, capture_output=True, text=True, timeout=7200)
         _update(rid, progress=65)
         # With no intro/outro, preserve the original VOD without re-encoding.
         if not intro and not outro and export_quality == "original":

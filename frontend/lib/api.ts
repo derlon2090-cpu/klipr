@@ -1,10 +1,5 @@
 export type Status =
-  | "queued"
-  | "recording"
-  | "reconnecting"
-  | "processing"
-  | "ready"
-  | "failed";
+  "queued" | "recording" | "reconnecting" | "processing" | "ready" | "failed";
 export type Clip = {
   id: string;
   start_seconds: number;
@@ -131,7 +126,8 @@ export type CreatorSuggestion = {
   status: "new" | "reviewed";
   created_at: string;
 };
-export type VodStatus = "fetching_metadata" | "downloading" | "remuxing" | "ready" | "failed";
+export type VodStatus =
+  "fetching_metadata" | "downloading" | "remuxing" | "ready" | "failed";
 export type Vod = {
   id: string;
   url: string;
@@ -190,26 +186,35 @@ export type SmartThumbnail = {
 const API = (process.env.NEXT_PUBLIC_API_URL || "/api").replace(/\/$/, "");
 
 function errorMessage(status: number, body: unknown): string {
-  const detail = (body as { detail?: unknown; message?: unknown } | null)?.detail ??
+  const detail =
+    (body as { detail?: unknown; message?: unknown } | null)?.detail ??
     (body as { message?: unknown } | null)?.message;
   if (Array.isArray(detail)) {
     const fields = detail
       .map((item) => {
         const value = item as { loc?: unknown[]; msg?: unknown };
-        const field = Array.isArray(value.loc) ? value.loc.filter((part) => part !== "body").join(".") : "";
-        return field ? `${field}: ${String(value.msg ?? "invalid value")}` : String(value.msg ?? "invalid value");
+        const field = Array.isArray(value.loc)
+          ? value.loc.filter((part) => part !== "body").join(".")
+          : "";
+        return field
+          ? `${field}: ${String(value.msg ?? "invalid value")}`
+          : String(value.msg ?? "invalid value");
       })
       .join(" · ");
     return `خطأ في البيانات (${status}): ${fields}`;
   }
-  if (typeof detail === "string" && detail.trim()) return `${detail} (${status})`;
+  if (typeof detail === "string" && detail.trim())
+    return `${detail} (${status})`;
   return `فشل الطلب من الخادم (${status})`;
 }
 
 function handleUnauthorized(path: string) {
   if (typeof window === "undefined" || path.startsWith("/auth/")) return;
   // The auth cookie is HttpOnly; the logout endpoint clears it server-side.
-  void fetch(`${API}/auth/logout`, { method: "POST", credentials: "include" }).catch(() => undefined);
+  void fetch(`${API}/auth/logout`, {
+    method: "POST",
+    credentials: "include",
+  }).catch(() => undefined);
   window.location.assign("/login?reason=session-expired");
 }
 
@@ -223,12 +228,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       cache: "no-store",
     });
   } catch {
-    throw new Error("تعذّر الاتصال بالخادم — تأكد من تشغيل الباك إند والاتصال بالشبكة.");
+    throw new Error(
+      "تعذّر الاتصال بالخادم — تأكد من تشغيل الباك إند والاتصال بالشبكة.",
+    );
   }
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     if (response.status === 401) handleUnauthorized(path);
-    throw Object.assign(new Error(errorMessage(response.status, body)), { detail: body?.detail, status: response.status });
+    throw Object.assign(new Error(errorMessage(response.status, body)), {
+      detail: body?.detail,
+      status: response.status,
+    });
   }
   return response.status === 204 ? (undefined as T) : response.json();
 }
@@ -242,12 +252,17 @@ async function upload<T>(path: string, body: FormData): Promise<T> {
       cache: "no-store",
     });
   } catch {
-    throw new Error("تعذّر الاتصال بالخادم — تأكد من تشغيل الباك إند والاتصال بالشبكة.");
+    throw new Error(
+      "تعذّر الاتصال بالخادم — تأكد من تشغيل الباك إند والاتصال بالشبكة.",
+    );
   }
   if (!response.ok) {
     const data = await response.json().catch(() => null);
     if (response.status === 401) handleUnauthorized(path);
-    throw Object.assign(new Error(errorMessage(response.status, data)), { detail: data?.detail, status: response.status });
+    throw Object.assign(new Error(errorMessage(response.status, data)), {
+      detail: data?.detail,
+      status: response.status,
+    });
   }
   return response.json();
 }
@@ -320,27 +335,63 @@ export const api = {
   streams: () => request<Stream[]>("/streams"),
   vods: () => request<Vod[]>("/vods"),
   importVod: (url: string, quality: "4k" = "4k") =>
-    request<Vod>("/vods/import", { method: "POST", body: JSON.stringify({ url, quality }) }),
+    request<Vod>("/vods/import", {
+      method: "POST",
+      body: JSON.stringify({ url, quality }),
+    }),
   vodStatus: (id: string) => request<Vod>(`/vods/status/${id}`),
-  cancelVod: (id: string) => request<Vod>(`/vods/${id}/cancel`, { method: "POST" }),
+  cancelVod: (id: string) =>
+    request<Vod>(`/vods/${id}/cancel`, { method: "POST" }),
   generateAiMetadata: (vod_id: string, regenerate = false) =>
-    request<AiMetadata>("/ai-metadata/generate", { method: "POST", body: JSON.stringify({ vod_id, regenerate }) }),
+    request<AiMetadata>("/ai-metadata/generate", {
+      method: "POST",
+      body: JSON.stringify({ vod_id, regenerate }),
+    }),
   deleteVod: (id: string) => request<void>(`/vods/${id}`, { method: "DELETE" }),
-  openVodInEditor: (id: string) => request<Stream>(`/vods/${id}/open-in-editor`, { method: "POST" }),
-  generateVodClips: (id: string) => request<void>(`/vods/${id}/generate-clips`, { method: "POST", body: JSON.stringify({}) }),
-  createStudioRender: (vodId: string, assets: { exportQuality: "original" | "4k"; intro?: File | null; outro?: File | null }) => {
+  openVodInEditor: (id: string) =>
+    request<Stream>(`/vods/${id}/open-in-editor`, { method: "POST" }),
+  generateVodClips: (id: string) =>
+    request<void>(`/vods/${id}/generate-clips`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+  createStudioRender: (
+    vodId: string,
+    assets: {
+      exportQuality: "original" | "4k";
+      intro?: File | null;
+      outro?: File | null;
+      startSeconds?: number;
+      endSeconds?: number;
+    },
+  ) => {
     const body = new FormData();
     body.append("vod_id", vodId);
     body.append("export_quality", assets.exportQuality);
+    if (assets.startSeconds !== undefined)
+      body.append("start_seconds", String(assets.startSeconds));
+    if (assets.endSeconds !== undefined)
+      body.append("end_seconds", String(assets.endSeconds));
     if (assets.intro) body.append("intro", assets.intro);
     if (assets.outro) body.append("outro", assets.outro);
     return upload<StudioRender>("/studio/renders", body);
   },
   studioRender: (id: string) => request<StudioRender>(`/studio/renders/${id}`),
-  createSmartThumbnails: (vod_id: string, platform: SmartThumbnail["platform"], frame_style: SmartThumbnail["frame_style"]) =>
-    request<SmartThumbnail[]>("/smart-thumbnails", { method: "POST", body: JSON.stringify({ vod_id, platform, frame_style }) }),
-  smartThumbnail: (id: string) => request<SmartThumbnail>(`/smart-thumbnails/${id}`),
-  approveSmartThumbnail: (id: string) => request<SavedThumbnail>(`/smart-thumbnails/${id}/approve`, { method: "POST" }),
+  createSmartThumbnails: (
+    vod_id: string,
+    platform: SmartThumbnail["platform"],
+    frame_style: SmartThumbnail["frame_style"],
+  ) =>
+    request<SmartThumbnail[]>("/smart-thumbnails", {
+      method: "POST",
+      body: JSON.stringify({ vod_id, platform, frame_style }),
+    }),
+  smartThumbnail: (id: string) =>
+    request<SmartThumbnail>(`/smart-thumbnails/${id}`),
+  approveSmartThumbnail: (id: string) =>
+    request<SavedThumbnail>(`/smart-thumbnails/${id}/approve`, {
+      method: "POST",
+    }),
   archiveShorts: () => request<ArchiveShort[]>("/archive/shorts"),
   stream: (id: string) => request<Stream>(`/streams/${id}`),
   preview: (stream_url: string) =>
@@ -414,9 +465,13 @@ export const api = {
   uploadOverlayLogo: (file: File) => {
     const body = new FormData();
     body.append("file", file);
-    return upload<{ overlay_logo_key: string; overlay_logo_url?: string }>("/branding/overlay-logo", body);
+    return upload<{ overlay_logo_key: string; overlay_logo_url?: string }>(
+      "/branding/overlay-logo",
+      body,
+    );
   },
-  deleteOverlayLogo: () => request<void>("/branding/overlay-logo", { method: "DELETE" }),
+  deleteOverlayLogo: () =>
+    request<void>("/branding/overlay-logo", { method: "DELETE" }),
   uploadThumbnail: (file: File, kind: "vod" | "short") => {
     const body = new FormData();
     body.append("file", file);

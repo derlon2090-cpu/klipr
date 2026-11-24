@@ -339,7 +339,7 @@ class SmartThumbnailRequest(BaseModel):
 
 def studio_render_data(item: StudioRender) -> dict:
     return {"id": str(item.id), "vod_id": str(item.vod_id), "status": item.status,
-            "progress": item.progress, "export_quality": item.export_quality, "error": item.error_message,
+            "progress": item.progress, "export_quality": item.export_quality, "start_seconds": item.start_seconds, "end_seconds": item.end_seconds, "error": item.error_message,
             "download_url": f"/studio/renders/{item.id}/download" if item.status == "ready" and item.output_path else None,
             "created_at": item.created_at.isoformat() if item.created_at else None}
 
@@ -836,6 +836,8 @@ def delete_vod(vod_id: UUID):
 async def create_studio_render(
     vod_id: UUID = Form(...),
     export_quality: str = Form("original"),
+    start_seconds: float | None = Form(None),
+    end_seconds: float | None = Form(None),
     intro: UploadFile | None = File(None),
     outro: UploadFile | None = File(None),
 ):
@@ -846,7 +848,10 @@ async def create_studio_render(
             raise HTTPException(409, "Select a ready VOD from the vault first")
         if export_quality not in {"original", "4k"}:
             raise HTTPException(422, "export_quality must be original or 4k")
-        render = StudioRender(vod_id=vod_id, status="queued", progress=0, export_quality=export_quality)
+        if start_seconds is not None and start_seconds < 0: raise HTTPException(422, "start_seconds must be positive")
+        if end_seconds is not None and (start_seconds is None or end_seconds <= start_seconds): raise HTTPException(422, "end_seconds must be after start_seconds")
+        if end_seconds is not None and vod.duration_seconds and end_seconds > vod.duration_seconds: raise HTTPException(422, "end_seconds exceeds the VOD duration")
+        render = StudioRender(vod_id=vod_id, status="queued", progress=0, export_quality=export_quality, start_seconds=start_seconds, end_seconds=end_seconds)
         db.add(render); db.commit(); db.refresh(render)
         render_id = render.id
     folder = Path("/var/lib/klipr/studio") / str(render_id)

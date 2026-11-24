@@ -194,6 +194,8 @@ class StudioRender(Base):
     status: Mapped[str] = mapped_column(String(16), default="queued", index=True)
     progress: Mapped[float] = mapped_column(Float, default=0)
     export_quality: Mapped[str] = mapped_column(String(24), default="original")
+    start_seconds: Mapped[float | None] = mapped_column(Float)
+    end_seconds: Mapped[float | None] = mapped_column(Float)
     thumbnail_path: Mapped[str | None] = mapped_column(Text)
     intro_path: Mapped[str | None] = mapped_column(Text)
     outro_path: Mapped[str | None] = mapped_column(Text)
