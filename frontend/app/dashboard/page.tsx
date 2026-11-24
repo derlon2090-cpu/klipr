@@ -2469,18 +2469,15 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
   const hasExpiredSession = Object.values(credentials).some((item) => item.status === "expired");
   const presetsView = (
     <>
-      <SectionTitle icon={CheckCircle2} eyebrow={ar ? "المكتبة والأصول" : "LIBRARY & ASSETS"} title={ar ? "المحفوظات التعديلية" : "Editing presets"} description={ar ? "احفظ ختم علامتك ليُدمج تلقائياً في كل شورت جديد من البثوث المحفوظة." : "Save a brand overlay that is burned into every newly exported Short."} />
+      <SectionTitle icon={CheckCircle2} eyebrow={ar ? "هوية القناة" : "CHANNEL IDENTITY"} title={ar ? "الشعار والبنر" : "Logo & YouTube banner"} description={ar ? "احفظ هوية موحّدة: شعار أسود بإطار أخضر وبنر يوتيوب باسم القناة." : "Save a unified black-and-emerald logo card and YouTube channel banner."} />
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <section className="rounded-3xl border border-emerald-100 bg-white p-6 shadow-sm">
-          <div className="mx-auto flex aspect-[9/16] max-w-[330px] items-start bg-[linear-gradient(155deg,#0f172a,#155e50_52%,#0f172a)] p-5 shadow-2xl" style={{ justifyContent: branding.overlay_position === "top-right" ? "flex-end" : branding.overlay_position === "top-left" ? "flex-start" : "center", alignItems: branding.overlay_position === "bottom-center" ? "flex-end" : "flex-start" }}>
-            <div className="flex max-w-full items-center gap-3 rounded-full border-4 border-emerald-400 bg-white/95 py-2 pe-5 ps-2 shadow-lg">
-              <div className="grid size-14 shrink-0 place-items-center overflow-hidden rounded-full bg-emerald-600 text-xs font-black text-white">
-                {branding.overlay_logo_url ? <img src={branding.overlay_logo_url} alt="Preset logo" className="h-full w-full object-cover" /> : "K"}
-              </div>
-              <span className="truncate text-lg font-black text-slate-900">{branding.overlay_creator_name || (ar ? "اسم المشهور" : "Creator name")}</span>
-            </div>
+        <section className="space-y-6 rounded-3xl border border-emerald-100 bg-white p-6 shadow-sm">
+          <div><div className="mb-3 flex items-center justify-between"><b>{ar ? "شعار القناة · YouTube 16:9" : "Channel logo · YouTube 16:9"}</b>{branding.overlay_logo_url && <a href={branding.overlay_logo_url} download className="text-xs font-black text-emerald-700">{ar ? "تنزيل الشعار" : "Download logo"}</a>}</div>
+            <div className="relative mx-auto grid aspect-video max-w-3xl place-items-center overflow-hidden rounded-2xl border-[10px] border-emerald-500 bg-black shadow-[0_0_40px_rgba(16,185,129,.25)]"><div className="text-center"><p className="mb-3 text-sm font-black tracking-[.25em] text-emerald-300">{branding.overlay_creator_name || (ar ? "اسم المشهور" : "CREATOR")}</p><div className="mx-auto grid size-40 place-items-center overflow-hidden rounded-3xl bg-emerald-600 shadow-2xl">{branding.overlay_logo_url ? <img src={branding.overlay_logo_url} alt="Channel logo" className="h-full w-full object-contain" /> : <span className="text-7xl font-black text-white">K</span>}</div><p className="mt-4 text-3xl font-black text-white drop-shadow-lg">{branding.overlay_creator_name || (ar ? "اسم المشهور" : "Creator name")}</p></div></div>
           </div>
-          <p className="mt-4 text-center text-xs font-bold text-slate-500">1080 × 1920 · {ar ? "معاينة حية للختم" : "live overlay preview"}</p>
+          <div><div className="mb-3 flex items-center justify-between"><b>{ar ? "بنر يوتيوب" : "YouTube banner"}</b><span className="text-xs text-slate-500">2560 × 1440</span></div>
+            <div className="relative mx-auto flex aspect-[16/9] max-w-3xl items-center justify-center overflow-hidden rounded-2xl border border-emerald-500 bg-[radial-gradient(circle_at_50%_20%,#14532d,#020617_65%)] px-8 shadow-xl"><div className="absolute inset-0 opacity-30 [background-image:linear-gradient(120deg,transparent_10%,#34d399_50%,transparent_90%)]"/><div className="relative text-center"><p className="text-4xl font-black tracking-tight text-white sm:text-6xl"><span className="text-emerald-300">{(branding.overlay_creator_name || "Klipr").split(" ")[0]}</span>{" "}{(branding.overlay_creator_name || (ar ? "المشهور" : "Creator")).split(" ").slice(1).join(" ")}</p><p className="mt-4 text-sm font-bold tracking-[.2em] text-slate-200">{ar ? "القناة الرسمية · مقاطع وبثوث مميزة" : "OFFICIAL CHANNEL · STREAMS & HIGHLIGHTS"}</p></div></div>
+          </div>
         </section>
         <aside className="space-y-5 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <label className="block text-sm font-black">{ar ? "اسم المشهور / الستريمر" : "Creator / streamer name"}<input value={branding.overlay_creator_name || ""} onChange={(event) => setBranding({ ...branding, overlay_creator_name: event.target.value })} maxLength={120} placeholder="@drb7h" className={inputClass} /></label>
