@@ -85,24 +85,27 @@ def _render(frame: Path, output: Path, headline: str, platform: str, style: str)
     draw = ImageDraw.Draw(image)
     accent = "#53fc18" if platform == "kick" else "#ff1744" if platform in {"tiktok", "shorts", "reels"} else "#ff003c"
     if style != "none":
-        width = max(4, round(size[0] * (.006 if style == "bold" else .003)))
-        # The frame deliberately touches every outer edge, unlike an inset
-        # overlay, so the exported JPEG keeps a crisp platform-ready border.
-        for offset in range(width):
-            draw.rectangle((offset, offset, size[0] - 1 - offset, size[1] - 1 - offset), outline=accent)
-    # A compact, high-contrast two-line treatment inspired by modern gaming
-    # thumbnails: short Arabic hook, white lead line and yellow payoff line.
+        border = max(8, round(size[0] * (.014 if style == "bold" else .008)))
+        # One uninterrupted frame, drawn inside the image boundary so no
+        # segment disappears when platforms crop the thumbnail preview.
+        draw.rectangle((border // 2, border // 2, size[0] - 1 - border // 2, size[1] - 1 - border // 2), outline=accent, width=border)
+    # Use a compact, readable Arabic headline in a dedicated contrast panel.
     words = headline.split()
     lines = [" ".join(words[:max(1, len(words) // 2)]), " ".join(words[max(1, len(words) // 2):])]
     lines = [line for line in lines if line] or [headline]
-    font_size = max(52, round(size[0] * (.10 if portrait else .055)))
+    font_size = max(58, round(size[0] * (.105 if portrait else .065)))
     font = _font(font_size)
-    x = int(size[0] * .06)
-    y = int(size[1] * (.10 if portrait else .12))
+    margin = int(size[0] * .055)
+    line_gap = int(font_size * .92)
+    panel_height = margin + len(lines) * line_gap + margin
+    panel_width = min(int(size[0] * .56), max(int(size[0] * .32), max((draw.textbbox((0, 0), get_display(reshape(line)), font=font)[2] for line in lines)) + margin * 2))
+    panel_left = size[0] - panel_width - margin
+    panel_top = margin
+    draw.rounded_rectangle((panel_left, panel_top, panel_left + panel_width, panel_top + panel_height), radius=max(18, margin // 2), fill=(4, 10, 12, 218), outline=accent, width=max(3, border // 3 if style != "none" else 3))
     for line_index, line in enumerate(lines):
         text = get_display(reshape(line))
         color = "#ffffff" if line_index == 0 else "#ffe600"
-        draw.text((x, y + line_index * int(font_size * .86)), text, font=font, fill=color, stroke_width=max(3, font_size // 14), stroke_fill="#080808")
+        draw.text((size[0] - margin * 2, panel_top + margin // 2 + line_index * line_gap), text, anchor="ra", font=font, fill=color, stroke_width=max(3, font_size // 18), stroke_fill="#080808")
     output.parent.mkdir(parents=True, exist_ok=True)
     image.save(output, "JPEG", quality=95, optimize=True)
 
