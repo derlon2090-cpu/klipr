@@ -242,6 +242,7 @@ export function DashboardWorkspace({
   const [editorRanges, setEditorRanges] = useState<
     Record<string, { start: string; end: string }>
   >({});
+  const [editorToEnd, setEditorToEnd] = useState<Record<string, boolean>>({});
   const [smartVodId, setSmartVodId] = useState("");
   const [smartPlatform, setSmartPlatform] =
     useState<SmartThumbnail["platform"]>("youtube");
@@ -2673,8 +2674,11 @@ export function DashboardWorkspace({
     const labels = ar
       ? ["ساعة", "دقيقة", "ثانية"]
       : ["Hour", "Minute", "Second"];
+    const toEnd = key === "end" && Boolean(editorToEnd[vod.id]);
     return (
-      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+      <div
+        className={`rounded-xl border p-3 ${toEnd ? "border-emerald-300 bg-emerald-50" : "border-slate-200 bg-slate-50"}`}
+      >
         <p className="mb-2 text-xs font-black text-slate-700">{label}</p>
         <div className="grid grid-cols-3 gap-1">
           {parts.map((part, index) => (
@@ -2687,15 +2691,42 @@ export function DashboardWorkspace({
                 type="number"
                 min="0"
                 max={part === "hours" ? 99 : 59}
+                disabled={toEnd}
                 value={values[index]}
                 onChange={(event) =>
                   updateEditorialTime(vod.id, key, part, event.target.value)
                 }
-                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-1 py-2 text-center text-sm font-black"
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-1 py-2 text-center text-sm font-black disabled:bg-emerald-100 disabled:text-emerald-800"
               />
             </label>
           ))}
         </div>
+        {key === "end" && (
+          <button
+            type="button"
+            onClick={() => {
+              const active = !editorToEnd[vod.id];
+              setEditorToEnd({ ...editorToEnd, [vod.id]: active });
+              if (active)
+                setEditorRanges({
+                  ...editorRanges,
+                  [vod.id]: {
+                    start: editorRanges[vod.id]?.start || "0",
+                    end: String(vod.duration_seconds || 0),
+                  },
+                });
+            }}
+            className={`mt-3 w-full rounded-lg px-3 py-2 text-xs font-black transition ${toEnd ? "bg-emerald-600 text-white" : "border border-emerald-300 bg-white text-emerald-700"}`}
+          >
+            {toEnd
+              ? ar
+                ? "✓ محدد إلى نهاية البث"
+                : "✓ Set to end of broadcast"
+              : ar
+                ? "إلى نهاية البث"
+                : "To end of broadcast"}
+          </button>
+        )}
       </div>
     );
   };
