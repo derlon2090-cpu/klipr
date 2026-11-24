@@ -9,7 +9,7 @@ from celery import shared_task
 
 from app.db import SessionLocal
 from app.models import ArchiveBranding, StudioRender, Vod
-from app.storage import download_file, presigned_download_url
+from app.storage import download_file, presigned_download_url, upload_file
 from app.worker.tasks import WORK_ROOT
 
 
@@ -123,8 +123,11 @@ def render_studio(self, render_id: str) -> None:
         subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_list), "-c", "copy", str(merged)], check=True, capture_output=True, text=True, timeout=7200)
         _update(rid, progress=75)
         shutil.move(merged, output)
+        _update(rid, progress=92)
+        storage_key = f"editorial/{vod.id}/{rid}.mp4"
+        upload_file(output, storage_key, "video/mp4")
         _cleanup_intermediates(job_dir, output)
-        _update(rid, status="ready", progress=100, output_path=str(output), intro_path=None, outro_path=None)
+        _update(rid, status="ready", progress=100, output_path=str(output), storage_key=storage_key, intro_path=None, outro_path=None)
     except Exception as error:
         _update(rid, status="failed", error_message=str(error)[-1800:])
         raise

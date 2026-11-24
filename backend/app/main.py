@@ -340,7 +340,7 @@ class SmartThumbnailRequest(BaseModel):
 def studio_render_data(item: StudioRender) -> dict:
     return {"id": str(item.id), "vod_id": str(item.vod_id), "status": item.status,
             "progress": item.progress, "export_quality": item.export_quality, "start_seconds": item.start_seconds, "end_seconds": item.end_seconds, "error": item.error_message,
-            "download_url": f"/studio/renders/{item.id}/download" if item.status == "ready" and item.output_path else None,
+            "download_url": f"/studio/renders/{item.id}/download" if item.status == "ready" and (item.output_path or item.storage_key) else None,
             "created_at": item.created_at.isoformat() if item.created_at else None}
 
 
@@ -906,8 +906,10 @@ def studio_render_status(render_id: UUID):
 def download_studio_render(render_id: UUID):
     with SessionLocal() as db:
         item = db.get(StudioRender, render_id)
-        if item is None or item.status != "ready" or not item.output_path:
+        if item is None or item.status != "ready" or not (item.output_path or item.storage_key):
             raise HTTPException(404, "The final render is not ready")
+        if item.storage_key:
+            return RedirectResponse(presigned_download_url(item.storage_key), status_code=307)
         output = Path(item.output_path)
     if not output.is_file(): raise HTTPException(404, "The final render file is unavailable")
     return FileResponse(output, media_type="video/mp4", filename=f"klipr-studio-{render_id}.mp4")
