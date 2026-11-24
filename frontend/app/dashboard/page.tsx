@@ -629,8 +629,8 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
     setMessage("");
     try {
       const canvas = document.createElement("canvas");
-      canvas.width = thumbFormat === "short" ? 1080 : 3840;
-      canvas.height = thumbFormat === "short" ? 1920 : 2160;
+      canvas.width = thumbFormat === "short" ? 1080 : 1920;
+      canvas.height = thumbFormat === "short" ? 1920 : 1080;
       const canvasWidth = canvas.width;
       const canvasHeight = canvas.height;
       const context = canvas.getContext("2d");
@@ -1727,11 +1727,11 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
         <div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="text-xl font-black">{ar ? "صانع الثامبنيل بالذكاء الاصطناعي" : "AI Thumbnail Studio"}</h2><p className="mt-1 text-sm text-slate-600">{ar ? "حلّل البث المختار واحصل على 3 لقطات مع عناوين عربية قابلة للتنزيل." : "Analyze a saved VOD and get three downloadable, captioned moments."}</p></div><span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-black text-violet-700">OpenAI Vision + DeepSeek</span></div>
         <div className="mt-5 grid gap-3 lg:grid-cols-4">
           <select value={smartVodId} onChange={(event) => setSmartVodId(event.target.value)} className={inputClass}><option value="">{ar ? "اختر بثاً محفوظاً" : "Choose a saved VOD"}</option>{vods.filter((vod) => vod.status === "ready").map((vod) => <option key={vod.id} value={vod.id}>{vod.title || "Untitled VOD"}</option>)}</select>
-          <select value={smartPlatform} onChange={(event) => setSmartPlatform(event.target.value as SmartThumbnail["platform"])} className={inputClass}><option value="youtube">YouTube · 16:9 · 4K UHD</option><option value="tiktok">TikTok · 9:16 · 1080×1920</option><option value="shorts">YouTube Shorts · 9:16</option><option value="reels">Reels · 9:16</option><option value="x">X / Twitter · 16:9 · 4K UHD</option><option value="kick">Kick · 16:9 · 4K UHD</option></select>
+          <select value={smartPlatform} onChange={(event) => setSmartPlatform(event.target.value as SmartThumbnail["platform"])} className={inputClass}><option value="youtube">YouTube · 16:9 · Original quality</option><option value="tiktok">TikTok · 9:16 · 1080×1920</option><option value="shorts">YouTube Shorts · 9:16</option><option value="reels">Reels · 9:16</option><option value="x">X / Twitter · 16:9 · Original quality</option><option value="kick">Kick · 16:9 · Original quality</option></select>
           <select value={smartStyle} onChange={(event) => setSmartStyle(event.target.value as SmartThumbnail["frame_style"])} className={inputClass}><option value="bold">{ar ? "إطار حماسي عالي التباين" : "Bold high-contrast frame"}</option><option value="clean">{ar ? "إطار نظيف" : "Clean platform frame"}</option><option value="none">{ar ? "بدون إطار" : "No frame"}</option></select>
           <button disabled={smartBusy || !smartVodId} onClick={async () => { setSmartBusy(true); setMessage(""); try { setSmartItems(await api.createSmartThumbnails(smartVodId, smartPlatform, smartStyle)); setMessage(ar ? "بدأ تحليل البث — ستظهر ثلاث لقطات هنا عند اكتماله." : "Analysis started — three suggestions will appear here."); } catch (error) { setMessage(error instanceof Error ? error.message : "Could not start thumbnail analysis"); } finally { setSmartBusy(false); } }} className="mt-2 inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-3 font-black text-white hover:bg-violet-700 disabled:opacity-50"><WandSparkles size={18}/>{smartBusy ? (ar ? "جارٍ البدء…" : "Starting…") : (ar ? "تحليل البث وصناعة الثامبنيل" : "Analyze & generate")}</button>
         </div>
-        {smartItems.length > 0 && <div className="mt-6 grid gap-5 md:grid-cols-3">{smartItems.map((item, index) => <article key={item.id} className="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="aspect-video shrink-0 bg-slate-100">{item.image_url ? <img src={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${item.image_url}`} alt={item.headline || "AI thumbnail"} className="h-full w-full object-cover"/> : <div className="grid h-full place-items-center text-sm font-bold text-slate-400">{item.status === "failed" ? (ar ? "فشل التوليد" : "Generation failed") : `${Math.round(item.progress)}%`}</div>}</div><div className="flex flex-1 flex-col p-4"><span className="text-[11px] font-black tracking-wide text-violet-600">{ar ? `اللقطة ${index + 1}` : `MOMENT ${index + 1}`}</span><p className="mt-1 min-h-12 font-black">{item.headline || (ar ? "يجري استخراج أفضل لقطة…" : "Finding the best frame…")}</p>{item.context && <p className="mt-2 line-clamp-2 text-xs text-slate-500">{item.context}</p>}{item.error && <p className="mt-2 text-xs text-rose-600">{item.error}</p>}{item.image_url && <a href={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${item.image_url}`} download className="mt-4 inline-flex items-center gap-2 text-sm font-black text-violet-700"><Download size={16}/>{ar ? "تنزيل 4K JPG" : "Download 4K JPG"}</a>}</div></article>)}</div>}
+        {smartItems.length > 0 && <div className="mt-6 grid gap-5 md:grid-cols-3">{smartItems.map((item, index) => <article key={item.id} className="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="aspect-video shrink-0 bg-slate-100">{item.image_url ? <img src={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${item.image_url}`} alt={item.headline || "AI thumbnail"} className="h-full w-full object-cover"/> : <div className="grid h-full place-items-center text-sm font-bold text-slate-400">{item.status === "failed" ? (ar ? "فشل التوليد" : "Generation failed") : `${Math.round(item.progress)}%`}</div>}</div><div className="flex flex-1 flex-col p-4"><span className="text-[11px] font-black tracking-wide text-violet-600">{ar ? `اللقطة ${index + 1}` : `MOMENT ${index + 1}`}</span><p className="mt-1 min-h-12 font-black">{item.headline || (ar ? "يجري استخراج أفضل لقطة…" : "Finding the best frame…")}</p>{item.context && <p className="mt-2 line-clamp-2 text-xs text-slate-500">{item.context}</p>}{item.error && <p className="mt-2 text-xs text-rose-600">{item.error}</p>}{item.image_url && <a href={`${process.env.NEXT_PUBLIC_API_URL || "/api"}${item.image_url}`} download className="mt-4 inline-flex items-center gap-2 text-sm font-black text-violet-700"><Download size={16}/>{ar ? "تنزيل JPG بدقة المصدر" : "Download source-quality JPG"}</a>}</div></article>)}</div>}
       </section>
       <div className="grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
         <aside className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -1746,7 +1746,7 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
               >
                 <b className="block text-sm">16:9</b>
                 <span className="mt-1 block text-xs text-slate-400">
-                  {ar ? "مقطع عادي · 4K UHD" : "Regular VOD · 4K UHD"}
+                  {ar ? "مقطع عادي · الدقة الأصلية" : "Regular VOD · original quality"}
                 </span>
               </button>
               <button
@@ -1831,7 +1831,7 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
               {ar ? "المعاينة الحية" : "Live preview"}
             </h2>
             <span className="text-xs text-slate-400">
-              {thumbFormat === "short" ? "1080 × 1920" : "3840 × 2160 · 4K UHD"}
+              {thumbFormat === "short" ? "1080 × 1920" : "1920 × 1080 · Original quality"}
             </span>
           </div>
           <div
@@ -1855,7 +1855,7 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
               <span
                 className={`absolute start-4 top-14 rounded-md border px-2.5 py-1 text-[10px] font-black tracking-wide text-white shadow-sm ${thumbPlatform === "twitch" ? "border-[#9146FF] bg-slate-950/90" : "border-[#53FC18] bg-slate-950/90"}`}
               >
-                4K UHD
+                ORIGINAL
               </span>
             )}
           </div>
@@ -2388,10 +2388,10 @@ export function DashboardWorkspace({ initialSection = "live" }: { initialSection
             <input value={vodUrl} onChange={(event) => setVodUrl(event.target.value)} dir="ltr" placeholder="https://www.twitch.tv/videos/...  أو  https://kick.com/user/videos/..." className={`${inputClass} mt-0 ps-11`} />
             <span className={`absolute start-3 top-3.5 text-xs font-black ${/twitch/i.test(vodUrl) ? "text-violet-600" : /kick/i.test(vodUrl) ? "text-lime-600" : "text-slate-400"}`}>{/twitch/i.test(vodUrl) ? "TW" : /kick/i.test(vodUrl) ? "K" : "URL"}</span>
           </div>
-          <div className="flex items-center justify-center rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-800">4K · 2160p60</div>
+          <div className="flex items-center justify-center rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-800">{ar ? "أعلى جودة أصلية" : "Best original quality"}</div>
           <button disabled={vodBusy || !vodUrl.trim()} className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 font-black text-white transition hover:bg-emerald-700 disabled:opacity-50"><FolderDown size={18}/>{ar ? "جلب وحفظ البث" : "Fetch & save VOD"}</button>
         </div>
-        <p className="mt-3 text-xs leading-5 text-emerald-800">{ar ? "يسحب أفضل مصدر متاح بالتنزيل المتوازي، ثم يخرج نسخة موحّدة 3840×2160 / 60fps بجودة احترافية. لا توجد أي خيارات جودة أقل." : "Fetches the best available source in parallel, then produces one professional 3840×2160 / 60fps master. No lower-quality options are available."}</p>
+        <p className="mt-3 text-xs leading-5 text-emerald-800">{ar ? "يسحب أعلى مصدر متاح بالتنزيل المتوازي ويحفظ دقته ومعدل إطاراته الأصليين دون تكبير وهمي. إن كان المصدر 4K/60 فسيبقى 4K/60، وإن كان 1080p/60 فسيحفظ 1080p/60 الحقيقي بسرعة." : "Fetches the best available source in parallel and preserves its native resolution and frame rate without artificial upscaling."}</p>
       </form>
       {vods.some((vod) => !["ready", "failed"].includes(vod.status)) && <div className="mb-7 space-y-3">{vods.filter((vod) => !["ready", "failed"].includes(vod.status)).map((vod) => <article key={vod.id} className="overflow-hidden rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm"><div className="flex items-center justify-between gap-3"><div className="min-w-0"><p className="truncate font-black">{vod.title || (ar ? "جارٍ استخراج بيانات البث…" : "Fetching VOD metadata…")}</p><p className="mt-1 text-xs font-bold text-emerald-700">{vod.status === "fetching_metadata" ? (ar ? "استخراج البيانات" : "Fetching metadata") : vod.status === "remuxing" ? (ar ? "تجهيز MP4 سريع التقديم" : "Preparing seekable MP4") : (ar ? "تحميل البث" : "Downloading VOD")}</p></div><span className="text-sm font-black text-emerald-700">{Math.round(vod.progress)}%</span></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-emerald-500 transition-all" style={{width: `${Math.max(3, vod.progress)}%`}} /></div><div className="mt-3 flex items-center justify-between gap-4 text-xs text-slate-500"><div className="flex gap-4"><span>{vod.download_speed || "—"}</span><span>{vod.eta_seconds ? `${vod.eta_seconds}s ETA` : ""}</span></div><button type="button" onClick={() => cancelVod(vod.id)} disabled={vodBusy} className="rounded-lg border border-rose-200 px-3 py-2 font-black text-rose-600 hover:bg-rose-50 disabled:opacity-50">{ar ? "إلغاء المعالجة فوراً" : "Cancel now"}</button></div></article>)}</div>}
       <div className="mb-3 flex items-center justify-between"><h2 className="text-lg font-black">{ar ? "البثوث الجاهزة" : "Ready broadcasts"}</h2><span className="text-xs font-bold text-slate-400">{vods.filter((vod) => vod.status === "ready").length}</span></div>

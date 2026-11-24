@@ -75,16 +75,17 @@ def _crop(image: Image.Image, size: tuple[int, int]) -> Image.Image:
 
 def _render(frame: Path, output: Path, headline: str, platform: str, style: str) -> None:
     portrait = platform in {"tiktok", "shorts", "reels"}
-    # Horizontal thumbnail masters are always rendered at genuine 4K UHD;
-    # social vertical covers keep their platform-native 1080×1920 master.
-    size = (1080, 1920) if portrait else (3840, 2160)
-    image = _crop(Image.open(frame).convert("RGB"), size)
+    source = Image.open(frame).convert("RGB")
+    # Keep horizontal covers at the actual source frame dimensions. Upscaling
+    # a 1080p broadcast to a fake 4K JPEG adds neither detail nor quality.
+    size = (1080, 1920) if portrait else source.size
+    image = _crop(source, size)
     image = ImageEnhance.Contrast(image).enhance(1.18)
     image = ImageEnhance.Color(image).enhance(1.15)
     draw = ImageDraw.Draw(image)
     accent = "#53fc18" if platform == "kick" else "#ff1744" if platform in {"tiktok", "shorts", "reels"} else "#ff003c"
     if style != "none":
-        width = 22 if style == "bold" else 10
+        width = max(4, round(size[0] * (.006 if style == "bold" else .003)))
         # The frame deliberately touches every outer edge, unlike an inset
         # overlay, so the exported JPEG keeps a crisp platform-ready border.
         for offset in range(width):
@@ -94,14 +95,14 @@ def _render(frame: Path, output: Path, headline: str, platform: str, style: str)
     words = headline.split()
     lines = [" ".join(words[:max(1, len(words) // 2)]), " ".join(words[max(1, len(words) // 2):])]
     lines = [line for line in lines if line] or [headline]
-    font_size = 110 if portrait else 94
+    font_size = max(52, round(size[0] * (.10 if portrait else .055)))
     font = _font(font_size)
     x = int(size[0] * .06)
     y = int(size[1] * (.10 if portrait else .12))
     for line_index, line in enumerate(lines):
         text = get_display(reshape(line))
         color = "#ffffff" if line_index == 0 else "#ffe600"
-        draw.text((x, y + line_index * int(font_size * .86)), text, font=font, fill=color, stroke_width=8, stroke_fill="#080808")
+        draw.text((x, y + line_index * int(font_size * .86)), text, font=font, fill=color, stroke_width=max(3, font_size // 14), stroke_fill="#080808")
     output.parent.mkdir(parents=True, exist_ok=True)
     image.save(output, "JPEG", quality=95, optimize=True)
 

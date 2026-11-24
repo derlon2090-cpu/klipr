@@ -212,8 +212,18 @@ def _probe_video(path: Path) -> dict[str, int | float | None]:
     return {"width": stream.get("width"), "height": stream.get("height"), "fps": fps, "bitrate": bitrate}
 
 
+def _media_shape(video: Path) -> tuple[int, int, str]:
+    """The target geometry used by the short branded clips around a VOD."""
+    result = subprocess.run([
+        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=width,height,avg_frame_rate", "-of", "json", str(video),
+    ], check=True, capture_output=True, text=True, timeout=120)
+    stream = (json.loads(result.stdout or "{}").get("streams") or [{}])[0]
+    return int(stream.get("width") or 1920), int(stream.get("height") or 1080), str(stream.get("avg_frame_rate") or "60/1")
+
+
 def _merge_default_identity(video: Path, directory: Path) -> Path:
-    """Prepend the 5s intro and append the 8s outro configured globally."""
+    """Prepend/append the defaults without re-encoding the multi-hour VOD."""
     with SessionLocal() as db:
         branding = db.get(ArchiveBranding, 1)
         keys = (branding.default_intro_key, branding.default_outro_key) if branding and branding.auto_merge_branding else (None, None)
@@ -221,7 +231,20 @@ def _merge_default_identity(video: Path, directory: Path) -> Path:
         return video
     intro, outro, merged = directory / "default-intro.mp4", directory / "default-outro.mp4", directory / "branded-vod.mp4"
     download_file(str(keys[0]), intro); download_file(str(keys[1]), outro)
-    subprocess.run(["ffmpeg", "-y", "-i", str(intro), "-i", str(video), "-i", str(outro), "-filter_complex", "[0:v][0:a][1:v][1:a][2:v][2:a]concat=n=3:v=1:a=1[v][a]", "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-preset", "veryfast", "-crf", "17", "-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart", str(merged)], check=True, capture_output=True, text=True, timeout=86400)
+    width, height, fps = _media_shape(video)
+    normalized: list[Path] = []
+    for label, asset in (("intro", intro), ("outro", outro)):
+        target = directory / f"{label}-matched.mp4"
+        subprocess.run(["ffmpeg", "-y", "-i", str(asset), "-vf", f"scale={width}:{height}:force_original_aspect_ratio=decrease:flags=lanczos,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps={fps}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-c:a", "aac", "-ar", "48000", "-b:a", "192k", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(target)], check=True, capture_output=True, text=True, timeout=1800)
+        normalized.append(target)
+    playlist = directory / "brand-concat.txt"
+    playlist.write_text("\n".join(f"file '{item.as_posix()}'" for item in (normalized[0], video, normalized[1])), encoding="utf-8")
+    try:
+        subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(playlist), "-c", "copy", "-movflags", "+faststart", str(merged)], check=True, capture_output=True, text=True, timeout=7200)
+    except subprocess.CalledProcessError:
+        # Never turn a fast import into a multi-hour transcode merely because
+        # a source has incompatible stream parameters.
+        return video
     video.unlink(missing_ok=True)
     return merged
 
@@ -233,8 +256,20 @@ def _remove_music_with_ai(video: Path, directory: Path, vod_id: UUID) -> Path:
         enabled = bool(branding and branding.ai_music_removal)
     if not enabled:
         return video
-    _update(vod_id, status=VodStatus.remuxing, progress=99, download_speed="AI music removal")
+    _update(vod_id, status=VodStatus.remuxing, progress=98, download_speed="Fast audio cleanup")
     audio, clean = directory / "source-audio.wav", directory / "music-cleaned.mp4"
+    duration_probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nokey=1:noprint_wrappers=1", str(video)], capture_output=True, text=True, timeout=120)
+    try:
+        duration_seconds = float(duration_probe.stdout.strip() or 0)
+    except ValueError:
+        duration_seconds = 0
+    if duration_seconds > 15 * 60:
+        # Demucs is excellent for short clips, but on a CPU-only worker a
+        # five-hour source blocks delivery for hours. Keep video untouched and
+        # apply the fast, non-destructive voice-focused cleanup instead.
+        subprocess.run(["ffmpeg", "-y", "-i", str(video), "-map", "0:v:0", "-map", "0:a?", "-af", "highpass=f=80,lowpass=f=8000,afftdn", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(clean)], check=True, capture_output=True, text=True, timeout=7200)
+        video.unlink(missing_ok=True)
+        return clean
     try:
         subprocess.run(["ffmpeg", "-y", "-i", str(video), "-vn", "-ac", "2", "-ar", "44100", str(audio)], check=True, capture_output=True, text=True, timeout=7200)
         separated = directory / "separated"
@@ -298,6 +333,8 @@ def import_vod(self, vod_id: str) -> None:
                 thumbnail_url=thumbnail_url, thumbnail_path=thumbnail_path,
                 status=VodStatus.downloading, progress=1, error_message=None)
 
+        existing_sources = [path for path in directory.glob("source.*") if path.suffix.lower() in {".mp4", ".mkv", ".webm", ".ts", ".m4v"}]
+        source = max(existing_sources, key=lambda path: path.stat().st_size) if existing_sources else None
         template = str(directory / "source.%(ext)s")
         # Always capture the best available source before producing the 4K
         # 60fps master, so no lower quality import path exists.
@@ -312,44 +349,36 @@ def import_vod(self, vod_id: str) -> None:
         ]
         command.extend(session_options)
         command.append(download_url)
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                   text=True, bufsize=1)
-        assert process.stdout is not None
-        last_progress = 1.0
-        last_update = 0.0
-        for line in process.stdout:
-            parts = line.strip().split("|", 4)
-            if len(parts) != 5 or not parts[0].startswith("download:"):
-                continue
-            downloaded = _number(parts[0].split(":", 1)[1]) or 0
-            total = _number(parts[1]) or _number(parts[2])
-            speed = _number(parts[3])
-            eta_value = _number(parts[4])
-            if total:
-                last_progress = max(last_progress, min(98.0, downloaded / total * 98.0))
-            now = time.monotonic()
-            if now - last_update >= 1:
-                _update(identifier, progress=last_progress, download_speed=_rate_label(speed),
-                        eta_seconds=int(eta_value) if eta_value is not None else None)
-                last_update = now
-        if process.wait() != 0:
-            raise RuntimeError("yt-dlp could not download this VOD. Check that it is public and available.")
-
-        candidates = [path for path in directory.glob("source.*") if path.suffix.lower() in {".mp4", ".mkv", ".webm", ".ts", ".m4v"}]
-        if not candidates:
-            raise RuntimeError("The download completed without a playable media file.")
-        source = max(candidates, key=lambda path: path.stat().st_size)
+        if source is None:
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                       text=True, bufsize=1)
+            assert process.stdout is not None
+            last_progress = 1.0
+            last_update = 0.0
+            for line in process.stdout:
+                parts = line.strip().split("|", 4)
+                if len(parts) != 5 or not parts[0].startswith("download:"):
+                    continue
+                downloaded = _number(parts[0].split(":", 1)[1]) or 0
+                total = _number(parts[1]) or _number(parts[2])
+                speed = _number(parts[3])
+                eta_value = _number(parts[4])
+                if total:
+                    last_progress = max(last_progress, min(96.0, downloaded / total * 96.0))
+                now = time.monotonic()
+                if now - last_update >= 1:
+                    _update(identifier, progress=last_progress, download_speed=_rate_label(speed),
+                            eta_seconds=int(eta_value) if eta_value is not None else None)
+                    last_update = now
+            if process.wait() != 0:
+                raise RuntimeError("yt-dlp could not download this VOD. Check that it is public and available.")
+            candidates = [path for path in directory.glob("source.*") if path.suffix.lower() in {".mp4", ".mkv", ".webm", ".ts", ".m4v"}]
+            if not candidates:
+                raise RuntimeError("The download completed without a playable media file.")
+            source = max(candidates, key=lambda path: path.stat().st_size)
         final = directory / "vod.mp4"
-        _update(identifier, status=VodStatus.remuxing, progress=99, download_speed=None, eta_seconds=None)
-        if quality == "4k":
-            subprocess.run([
-                "ffmpeg", "-y", "-i", str(source), "-map", "0:v:0", "-map", "0:a?",
-                "-vf", "scale=3840:2160:force_original_aspect_ratio=decrease:flags=lanczos,pad=3840:2160:(ow-iw)/2:(oh-ih)/2,unsharp=5:5:0.5:5:5:0,fps=60",
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "16",
-                "-c:a", "aac", "-b:a", "320k", "-ar", "48000",
-                "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(final),
-            ], check=True, capture_output=True, text=True, timeout=86400)
-        elif source.suffix.lower() == ".mp4":
+        _update(identifier, status=VodStatus.remuxing, progress=97, download_speed="Preserving original quality", eta_seconds=None)
+        if source.suffix.lower() == ".mp4":
             source.replace(final)
         else:
             subprocess.run(["ffmpeg", "-y", "-i", str(source), "-map", "0", "-c", "copy", "-movflags", "+faststart", str(final)],
