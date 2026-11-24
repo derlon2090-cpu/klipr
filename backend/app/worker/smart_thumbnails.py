@@ -27,7 +27,9 @@ def _update(item_id: UUID, **values: object) -> None:
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    for path in ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Bold.ttf"):
+    # Noto Naskh has complete Arabic shaping and punctuation support; DejaVu
+    # remains only a last-resort fallback for non-Arabic worker images.
+    for path in ("/usr/share/fonts/truetype/noto/NotoNaskhArabic-Bold.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"):
         if Path(path).exists(): return ImageFont.truetype(path, size)
     return ImageFont.load_default()
 
