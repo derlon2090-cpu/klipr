@@ -2632,6 +2632,73 @@ export function DashboardWorkspace({
       setStudioBusy(false);
     }
   };
+  const updateEditorialTime = (
+    vodId: string,
+    key: "start" | "end",
+    part: "hours" | "minutes" | "seconds",
+    raw: string,
+  ) => {
+    const current = Number(editorRanges[vodId]?.[key] || 0);
+    const parts = {
+      hours: Math.floor(current / 3600),
+      minutes: Math.floor((current % 3600) / 60),
+      seconds: Math.floor(current % 60),
+    };
+    parts[part] = Math.max(
+      0,
+      Math.min(part === "hours" ? 99 : 59, Number(raw) || 0),
+    );
+    const total = parts.hours * 3600 + parts.minutes * 60 + parts.seconds;
+    setEditorRanges({
+      ...editorRanges,
+      [vodId]: {
+        start: editorRanges[vodId]?.start || "0",
+        end: editorRanges[vodId]?.end || "0",
+        [key]: String(total),
+      },
+    });
+  };
+  const editorialTimeFields = (
+    vod: Vod,
+    key: "start" | "end",
+    label: string,
+  ) => {
+    const total = Number(editorRanges[vod.id]?.[key] || 0);
+    const values = [
+      Math.floor(total / 3600),
+      Math.floor((total % 3600) / 60),
+      Math.floor(total % 60),
+    ];
+    const parts = ["hours", "minutes", "seconds"] as const;
+    const labels = ar
+      ? ["ساعة", "دقيقة", "ثانية"]
+      : ["Hour", "Minute", "Second"];
+    return (
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <p className="mb-2 text-xs font-black text-slate-700">{label}</p>
+        <div className="grid grid-cols-3 gap-1">
+          {parts.map((part, index) => (
+            <label
+              key={part}
+              className="text-center text-[10px] font-bold text-slate-500"
+            >
+              {labels[index]}
+              <input
+                type="number"
+                min="0"
+                max={part === "hours" ? 99 : 59}
+                value={values[index]}
+                onChange={(event) =>
+                  updateEditorialTime(vod.id, key, part, event.target.value)
+                }
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-1 py-2 text-center text-sm font-black"
+              />
+            </label>
+          ))}
+        </div>
+      </div>
+    );
+  };
   const studioView = (
     <>
       <SectionTitle
@@ -3150,38 +3217,21 @@ export function DashboardWorkspace({
                   </p>
                 ) : vod.status === "ready" ? (
                   <div className="mt-4 grid grid-cols-2 gap-2">
-                    <input
-                      type="number"
-                      min="0"
-                      placeholder={ar ? "من ثانية" : "Start second"}
-                      value={editorRanges[vod.id]?.start || ""}
-                      onChange={(event) =>
-                        setEditorRanges({
-                          ...editorRanges,
-                          [vod.id]: {
-                            start: event.target.value,
-                            end: editorRanges[vod.id]?.end || "",
-                          },
-                        })
-                      }
-                      className="rounded-lg border border-slate-200 px-3 py-2 text-xs"
-                    />
-                    <input
-                      type="number"
-                      min="1"
-                      placeholder={ar ? "إلى ثانية" : "End second"}
-                      value={editorRanges[vod.id]?.end || ""}
-                      onChange={(event) =>
-                        setEditorRanges({
-                          ...editorRanges,
-                          [vod.id]: {
-                            start: editorRanges[vod.id]?.start || "0",
-                            end: event.target.value,
-                          },
-                        })
-                      }
-                      className="rounded-lg border border-slate-200 px-3 py-2 text-xs"
-                    />
+                    {editorialTimeFields(
+                      vod,
+                      "start",
+                      ar ? "البداية · من" : "Start from",
+                    )}
+                    {editorialTimeFields(
+                      vod,
+                      "end",
+                      ar ? "النهاية · إلى" : "End at",
+                    )}
+                    <p className="col-span-2 text-center text-[11px] font-bold text-emerald-700">
+                      {ar
+                        ? `مدة الجزء: ${vodDuration(Math.max(0, Number(editorRanges[vod.id]?.end || 0) - Number(editorRanges[vod.id]?.start || 0)))}`
+                        : `Selected duration: ${vodDuration(Math.max(0, Number(editorRanges[vod.id]?.end || 0) - Number(editorRanges[vod.id]?.start || 0)))}`}
+                    </p>
                     <button
                       onClick={() => startEditorialRange(vod)}
                       disabled={studioBusy}
