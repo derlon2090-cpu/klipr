@@ -27,6 +27,35 @@ def _has_audio(path: Path) -> bool:
     return bool(json.loads(result.stdout or "{}").get("streams"))
 
 
+def _duration_seconds(path: Path) -> float:
+    """Return a verified media duration instead of trusting container timestamps."""
+    result = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", str(path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    try:
+        duration = float(result.stdout.strip())
+    except ValueError as error:
+        raise RuntimeError("The selected video range could not be verified") from error
+    if duration <= 0:
+        raise RuntimeError("The selected video range is empty or invalid")
+    return duration
+
+
+def _require_workspace(job_dir: Path, required_bytes: int) -> None:
+    """Fail before a large export can exhaust the worker disk and corrupt PostgreSQL."""
+    free_bytes = shutil.disk_usage(job_dir).free
+    if free_bytes < required_bytes:
+        required_gib = required_bytes / (1024 ** 3)
+        free_gib = free_bytes / (1024 ** 3)
+        raise RuntimeError(
+            f"Not enough temporary workspace for this range ({free_gib:.0f} GiB free; "
+            f"{required_gib:.0f} GiB required). Choose a shorter end time and export it in parts."
+        )
+
+
 def _cleanup_intermediates(job_dir: Path, output: Path) -> None:
     """Keep only the downloadable result on the persistent media volume."""
     for path in job_dir.iterdir():
@@ -66,13 +95,19 @@ def render_studio(self, render_id: str) -> None:
             intro_file = job_dir / "default-intro.mp4"; download_file(branding.default_intro_key, intro_file); intro = str(intro_file)
         if not outro and branding and branding.default_outro_key:
             outro_file = job_dir / "default-outro.mp4"; download_file(branding.default_outro_key, outro_file); outro = str(outro_file)
+        expected_seconds = max(1.0, (end_seconds or vod.duration_seconds or 1) - (start_seconds or 0))
+        # The original range and its final copy coexist while FFmpeg concatenates.
+        # Reserve both before downloading anything; this prevents a full disk from
+        # leaving a truncated MP4 with bogus (for example 30-hour) timestamps.
+        source_estimate = int((vod.file_size or 0) * expected_seconds / max(1, vod.duration_seconds or expected_seconds))
+        if intro or outro:
+            _require_workspace(job_dir, max(8 * 1024 ** 3, source_estimate * 2 + 2 * 1024 ** 3))
         source_url = presigned_download_url(vod.storage_key)
         trim_command = ["ffmpeg", "-y"]
         if start_seconds is not None: trim_command += ["-ss", str(start_seconds)]
         trim_command += ["-i", source_url]
         if end_seconds is not None: trim_command += ["-t", str(end_seconds - (start_seconds or 0))]
-        trim_command += ["-map", "0:v:0", "-map", "0:a?", "-c", "copy", "-progress", "pipe:1", "-nostats", str(source)]
-        expected_seconds = max(1.0, (end_seconds or vod.duration_seconds or 1) - (start_seconds or 0))
+        trim_command += ["-map", "0:v:0", "-map", "0:a?", "-c", "copy", "-fflags", "+genpts", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", "-progress", "pipe:1", "-nostats", str(source)]
         trim_process = subprocess.Popen(trim_command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
         assert trim_process.stdout is not None
         for line in trim_process.stdout:
@@ -84,6 +119,12 @@ def render_studio(self, render_id: str) -> None:
                     pass
         if trim_process.wait() != 0:
             raise RuntimeError("Unable to extract the selected time range")
+        source_duration = _duration_seconds(source)
+        duration_tolerance = max(12.0, expected_seconds * 0.02)
+        if abs(source_duration - expected_seconds) > duration_tolerance:
+            raise RuntimeError(
+                f"The extracted range duration is invalid ({source_duration:.1f}s; expected {expected_seconds:.1f}s)."
+            )
         _update(rid, progress=65)
         # With no intro/outro, preserve the original VOD without re-encoding.
         if not intro and not outro and export_quality == "original":
@@ -120,7 +161,17 @@ def render_studio(self, render_id: str) -> None:
         concat_list = job_dir / "concat.txt"
         concat_list.write_text("".join(f"file '{path.as_posix()}'\n" for path in normalized), encoding="utf-8")
         merged = job_dir / "merged.mp4"
-        subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_list), "-c", "copy", str(merged)], check=True, capture_output=True, text=True, timeout=7200)
+        subprocess.run([
+            "ffmpeg", "-y", "-fflags", "+genpts", "-f", "concat", "-safe", "0", "-i", str(concat_list),
+            "-c", "copy", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", str(merged),
+        ], check=True, capture_output=True, text=True, timeout=7200)
+        expected_final_duration = sum(_duration_seconds(path) for path in normalized)
+        final_duration = _duration_seconds(merged)
+        final_tolerance = max(15.0, expected_final_duration * 0.02)
+        if abs(final_duration - expected_final_duration) > final_tolerance:
+            raise RuntimeError(
+                f"The merged file duration is invalid ({final_duration:.1f}s; expected {expected_final_duration:.1f}s)."
+            )
         _update(rid, progress=75)
         shutil.move(merged, output)
         _update(rid, progress=92)
@@ -130,4 +181,7 @@ def render_studio(self, render_id: str) -> None:
         _update(rid, status="ready", progress=100, output_path=str(output), storage_key=storage_key, intro_path=None, outro_path=None)
     except Exception as error:
         _update(rid, status="failed", error_message=str(error)[-1800:])
+        # A failed job is never a reusable source.  Removing it immediately
+        # protects PostgreSQL and future exports from disk exhaustion.
+        shutil.rmtree(job_dir, ignore_errors=True)
         raise
